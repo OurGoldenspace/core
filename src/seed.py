@@ -65,7 +65,7 @@ async def seed(session: AsyncSession, app_settings: Settings | None = None) -> d
                 "tenant_id": tenant_id,
                 "vendor_id": item["vendor_id"],
                 "name": item["name"],
-                "is_approved": 1 if item["is_approved"] else 0,
+                "is_approved": bool(item["is_approved"]),
                 "risk_level": item.get("risk_level"),
                 "credit_limit": item.get("credit_limit"),
                 "ytd_spent": item.get("ytd_spent", 0),

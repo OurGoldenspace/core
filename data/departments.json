@@ -1,0 +1,42 @@
+[
+  {
+    "dept_id": 1,
+    "name": "Engineering",
+    "budget_annual": 100000,
+    "budget_spent": 25928,
+    "approval_threshold": 5000,
+    "budget_available": 74072
+  },
+  {
+    "dept_id": 2,
+    "name": "Finance",
+    "budget_annual": 50000,
+    "budget_spent": 21064,
+    "approval_threshold": 3000,
+    "budget_available": 28936
+  },
+  {
+    "dept_id": 3,
+    "name": "HR",
+    "budget_annual": 30000,
+    "budget_spent": 7517,
+    "approval_threshold": 2000,
+    "budget_available": 22483
+  },
+  {
+    "dept_id": 4,
+    "name": "Operations",
+    "budget_annual": 75000,
+    "budget_spent": 9363,
+    "approval_threshold": 4000,
+    "budget_available": 65637
+  },
+  {
+    "dept_id": 5,
+    "name": "Sales",
+    "budget_annual": 60000,
+    "budget_spent": 8679,
+    "approval_threshold": 5000,
+    "budget_available": 51321
+  }
+]

@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: workcore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate fixture data
+        run: python data/generate_data.py
+
+      - name: Migrate and seed PostgreSQL
+        env:
+          PGPASSWORD: postgres
+          MIGRATION_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/workcore
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/workcore
+        run: |
+          psql -h localhost -U postgres -d workcore -f docker/postgres-init.sql
+          alembic upgrade head
+          python -m src.seed
+
+      - name: PostgreSQL concurrency and RLS
+        env:
+          POSTGRES_TEST_ADMIN_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/workcore
+          POSTGRES_TEST_APP_URL: postgresql+asyncpg://workcore_app:workcore_app@localhost:5432/workcore
+        run: pytest tests/test_postgres.py -v
+
+      - name: Pytest
+        env:
+          ANTHROPIC_API_KEY: ""
+          DATABASE_URL: sqlite+aiosqlite:///./ci.db
+        run: pytest tests/ -v
+
+      - name: Eval fixtures (same cases as promptfoo)
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: python evals/run_cases.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: promptfoo evals
+        env:
+          ANTHROPIC_API_KEY: ""
+        run: npx --yes promptfoo@latest eval --no-cache --output evals/.cache/results.json

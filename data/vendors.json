@@ -1,0 +1,182 @@
+[
+  {
+    "vendor_id": 1,
+    "name": "Acme Corp Supplies",
+    "is_approved": true,
+    "risk_level": "low",
+    "credit_limit": 50000,
+    "ytd_spent": 12500,
+    "country": "USA"
+  },
+  {
+    "vendor_id": 2,
+    "name": "Global Tech Solutions",
+    "is_approved": true,
+    "risk_level": "high",
+    "credit_limit": 25000,
+    "ytd_spent": 44348,
+    "country": "France"
+  },
+  {
+    "vendor_id": 3,
+    "name": "Office Essentials Plus",
+    "is_approved": true,
+    "risk_level": "high",
+    "credit_limit": 150000,
+    "ytd_spent": 2082,
+    "country": "USA"
+  },
+  {
+    "vendor_id": 4,
+    "name": "Premium Hardware Inc",
+    "is_approved": true,
+    "risk_level": "low",
+    "credit_limit": 50000,
+    "ytd_spent": 33118,
+    "country": "France"
+  },
+  {
+    "vendor_id": 5,
+    "name": "Digital Innovation Ltd",
+    "is_approved": true,
+    "risk_level": "high",
+    "credit_limit": 50000,
+    "ytd_spent": 46925,
+    "country": "France"
+  },
+  {
+    "vendor_id": 6,
+    "name": "Cloud Services Group",
+    "is_approved": false,
+    "risk_level": "low",
+    "credit_limit": 150000,
+    "ytd_spent": 38618,
+    "country": "UK"
+  },
+  {
+    "vendor_id": 7,
+    "name": "Enterprise Software Co",
+    "is_approved": true,
+    "risk_level": "low",
+    "credit_limit": 150000,
+    "ytd_spent": 22298,
+    "country": "UK"
+  },
+  {
+    "vendor_id": 8,
+    "name": "Industrial Supplies Direct",
+    "is_approved": true,
+    "risk_level": "low",
+    "credit_limit": 100000,
+    "ytd_spent": 6698,
+    "country": "USA"
+  },
+  {
+    "vendor_id": 9,
+    "name": "Professional Services LLC",
+    "is_approved": false,
+    "risk_level": "low",
+    "credit_limit": 100000,
+    "ytd_spent": 22541,
+    "country": "France"
+  },
+  {
+    "vendor_id": 10,
+    "name": "Tech Components Ltd",
+    "is_approved": true,
+    "risk_level": "low",
+    "credit_limit": 150000,
+    "ytd_spent": 35142,
+    "country": "USA"
+  },
+  {
+    "vendor_id": 11,
+    "name": "Business Solutions Inc",
+    "is_approved": false,
+    "risk_level": "low",
+    "credit_limit": 100000,
+    "ytd_spent": 41198,
+    "country": "France"
+  },
+  {
+    "vendor_id": 12,
+    "name": "Manufacturing Supplies Corp",
+    "is_approved": true,
+    "risk_level": "high",
+    "credit_limit": 50000,
+    "ytd_spent": 46174,
+    "country": "USA"
+  },
+  {
+    "vendor_id": 13,
+    "name": "Consulting Partners Global",
+    "is_approved": true,
+    "risk_level": "high",
+    "credit_limit": 50000,
+    "ytd_spent": 18965,
+    "country": "USA"
+  },
+  {
+    "vendor_id": 14,
+    "name": "Security Systems Inc",
+    "is_approved": true,
+    "risk_level": "low",
+    "credit_limit": 150000,
+    "ytd_spent": 18217,
+    "country": "Germany"
+  },
+  {
+    "vendor_id": 15,
+    "name": "Logistics Plus",
+    "is_approved": true,
+    "risk_level": "low",
+    "credit_limit": 100000,
+    "ytd_spent": 23283,
+    "country": "Canada"
+  },
+  {
+    "vendor_id": 16,
+    "name": "Marketing Services Co",
+    "is_approved": true,
+    "risk_level": "high",
+    "credit_limit": 25000,
+    "ytd_spent": 39920,
+    "country": "Canada"
+  },
+  {
+    "vendor_id": 17,
+    "name": "IT Support Solutions",
+    "is_approved": true,
+    "risk_level": "low",
+    "credit_limit": 150000,
+    "ytd_spent": 24867,
+    "country": "UK"
+  },
+  {
+    "vendor_id": 18,
+    "name": "Maintenance Services Group",
+    "is_approved": true,
+    "risk_level": "high",
+    "credit_limit": 100000,
+    "ytd_spent": 3665,
+    "country": "Canada"
+  },
+  {
+    "vendor_id": 19,
+    "name": "Procurement Direct",
+    "is_approved": true,
+    "risk_level": "medium",
+    "credit_limit": 150000,
+    "ytd_spent": 17546,
+    "country": "USA"
+  },
+  {
+    "vendor_id": 20,
+    "name": "Vendor Management Inc",
+    "is_approved": false,
+    "risk_level": "high",
+    "credit_limit": 100000,
+    "ytd_spent": 13934,
+    "country": "Germany"
+  }
+]

@@ -7,8 +7,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agent import process_invoice_workflow
@@ -46,15 +47,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+bearer_scheme = HTTPBearer(auto_error=False)
+
 
 async def current_tenant(
-    authorization: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    if not authorization or not authorization.lower().startswith("bearer "):
+    if credentials is None or not credentials.credentials.strip():
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
 
-    api_key = authorization.split(" ", 1)[1].strip()
+    api_key = credentials.credentials.strip()
     db = Database(session)
     tenant = await db.get_tenant_by_api_key(api_key)
     if tenant is None:

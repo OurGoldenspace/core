@@ -217,7 +217,7 @@ Groq is the preferred free-tier provider. Add your key only to `.env`:
 ```env
 LLM_PROVIDER=groq
 GROQ_API_KEY=gsk_your_key_here
-GROQ_MODEL=llama-3.1-8b-instant
+GROQ_MODEL=openai/gpt-oss-20b
 ```
 
 `LLM_PROVIDER=auto` selects Groq first, Anthropic second, and policy last.

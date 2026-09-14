@@ -55,7 +55,7 @@ async def test_groq_tool_call_is_normalized() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         response = await complete_groq(
             api_key="test-groq-key",
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             max_tokens=128,
             system_prompt="Use tools",
             tools=[tool_definition()],
@@ -111,7 +111,7 @@ async def test_groq_stream_emits_text_deltas() -> None:
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
         response = await complete_groq(
             api_key="test-groq-key",
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             max_tokens=128,
             system_prompt="Return JSON",
             tools=[tool_definition()],

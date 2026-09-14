@@ -7,8 +7,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from pathlib import Path
+
 from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +50,7 @@ app = FastAPI(
 )
 
 bearer_scheme = HTTPBearer(auto_error=False)
+DEMO_PAGE = Path(__file__).resolve().parent.parent / "static" / "index.html"
 
 
 async def current_tenant(
@@ -219,6 +222,11 @@ async def run_invoice_execution(
         tokens_used,
         duration_ms,
     )
+
+
+@app.get("/", include_in_schema=False)
+async def demo_page() -> FileResponse:
+    return FileResponse(DEMO_PAGE)
 
 
 @app.get("/health")

@@ -246,7 +246,9 @@ docker-compose up -d
 
 Compose runs Alembic with the migration role, seeds with that role, then starts the API as restricted `workcore_app`. PostgreSQL RLS is therefore active in the demo. See `docs/DATABASE.md`.
 
-### 3. Test Health
+### 3. Open the demo page
+
+Open http://127.0.0.1:8000 for the one-page UI (invoice in, decision and tools out). Approve appears only when the agent returns `needs_review`.
 
 ```bash
 curl http://localhost:8000/health

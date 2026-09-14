@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WorkCore Invoice Agent</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --line: #2c3846;
+      --text: #e8eef4;
+      --muted: #93a1b0;
+      --accent: #6ea8fe;
+      --ok: #3dd68c;
+      --warn: #f5c26b;
+      --bad: #ff7b72;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    h1 { font-size: 1.4rem; margin: 0 0 6px; }
+    p.lead { color: var(--muted); margin: 0 0 24px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    form, .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 18px;
+    }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin: 10px 0 4px; }
+    input, select, textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+    button {
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 14px;
+      background: var(--accent);
+      color: #081018;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #314155; color: var(--text); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status { font-size: 0.85rem; color: var(--muted); margin-top: 12px; }
+    .decision { font-size: 1.2rem; font-weight: 700; margin: 0 0 8px; }
+    .approved { color: var(--ok); }
+    .rejected, .error { color: var(--bad); }
+    .needs_review { color: var(--warn); }
+    pre {
+      white-space: pre-wrap;
+      font-size: 0.8rem;
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 12px;
+      overflow: auto;
+      max-height: 420px;
+    }
+    .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Invoice agent</h1>
+    <p class="lead">Submit an invoice. The agent runs tools, then returns a decision you can audit.</p>
+    <div class="grid">
+      <form id="invoice-form">
+        <label>API key</label>
+        <input id="api-key" value="test-key-12345" autocomplete="off" />
+        <label>Preset</label>
+        <select id="preset">
+          <option value="approve">Acme $2500 — expect approved</option>
+          <option value="reject">Vendor 20 $400 — expect rejected</option>
+          <option value="review">Acme $7500 — expect review</option>
+        </select>
+        <label>Invoice ID</label>
+        <input id="invoice_id" required />
+        <div class="row">
+          <div>
+            <label>Vendor ID</label>
+            <input id="vendor_id" type="number" min="1" required />
+          </div>
+          <div>
+            <label>Department ID</label>
+            <input id="department_id" type="number" min="1" required />
+          </div>
+        </div>
+        <label>Vendor name</label>
+        <input id="vendor_name" required />
+        <div class="row">
+          <div>
+            <label>Amount</label>
+            <input id="amount" type="number" min="0.01" step="0.01" required />
+          </div>
+          <div>
+            <label>Date</label>
+            <input id="date" type="date" required />
+          </div>
+        </div>
+        <label>Idempotency key</label>
+        <input id="idempotency_key" />
+        <div class="actions">
+          <button type="submit" id="submit-btn">Process invoice</button>
+          <button type="button" class="secondary" id="approve-btn" hidden>Approve review</button>
+        </div>
+        <p class="status" id="status"></p>
+      </form>
+      <section class="panel">
+        <p class="decision" id="decision">No run yet</p>
+        <p class="meta" id="meta"></p>
+        <pre id="output">Submit an invoice to see the decision and tool audit.</pre>
+      </section>
+    </div>
+  </main>
+  <script>
+    const presets = {
+      approve: {
+        vendor_id: 1,
+        vendor_name: "Acme Corp Supplies",
+        department_id: 1,
+        amount: 2500,
+        date: "2024-09-13",
+      },
+      reject: {
+        vendor_id: 20,
+        vendor_name: "Vendor Management Inc",
+        department_id: 1,
+        amount: 400,
+        date: "2024-09-13",
+      },
+      review: {
+        vendor_id: 1,
+        vendor_name: "Acme Corp Supplies",
+        department_id: 1,
+        amount: 7500,
+        date: "2024-09-13",
+      },
+    };
+
+    const fields = [
+      "invoice_id",
+      "vendor_id",
+      "vendor_name",
+      "department_id",
+      "amount",
+      "date",
+      "idempotency_key",
+    ];
+
+    let lastExecutionId = null;
+
+    function authHeaders() {
+      return {
+        Authorization: "Bearer " + document.getElementById("api-key").value.trim(),
+        "Content-Type": "application/json",
+      };
+    }
+
+    function applyPreset() {
+      const preset = presets[document.getElementById("preset").value];
+      const stamp = Date.now();
+      document.getElementById("invoice_id").value = "INV-UI-" + stamp;
+      document.getElementById("vendor_id").value = preset.vendor_id;
+      document.getElementById("vendor_name").value = preset.vendor_name;
+      document.getElementById("department_id").value = preset.department_id;
+      document.getElementById("amount").value = preset.amount;
+      document.getElementById("date").value = preset.date;
+      document.getElementById("idempotency_key").value = "ui-" + stamp;
+    }
+
+    function payload() {
+      const body = {};
+      for (const name of fields) {
+        const value = document.getElementById(name).value;
+        if (name === "vendor_id" || name === "department_id") body[name] = Number(value);
+        else if (name === "amount") body[name] = Number(value);
+        else body[name] = value;
+      }
+      return body;
+    }
+
+    async function readError(response) {
+      try {
+        const body = await response.json();
+        return JSON.stringify(body, null, 2);
+      } catch {
+        return await response.text();
+      }
+    }
+
+    async function loadAudit(executionId) {
+      const response = await fetch("/executions/" + executionId, {
+        headers: authHeaders(),
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      return response.json();
+    }
+
+    function render(result, audit) {
+      lastExecutionId = result.execution_id;
+      const decision = result.decision || "unknown";
+      const el = document.getElementById("decision");
+      el.textContent = decision;
+      el.className = "decision " + decision;
+      document.getElementById("meta").textContent =
+        "execution " + result.execution_id +
+        " · " + (result.tokens_used || 0) + " tokens" +
+        " · " + (result.duration_ms || 0) + " ms" +
+        (result.cached ? " · cached" : "");
+      document.getElementById("output").textContent = JSON.stringify(
+        {
+          decision: result.decision,
+          reason: result.reason,
+          tools: (audit.tools || []).map((tool) => ({
+            tool: tool.tool_name,
+            output: tool.output,
+          })),
+        },
+        null,
+        2
+      );
+      document.getElementById("approve-btn").hidden = decision !== "needs_review";
+    }
+
+    document.getElementById("preset").addEventListener("change", applyPreset);
+    applyPreset();
+
+    document.getElementById("invoice-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = document.getElementById("submit-btn");
+      button.disabled = true;
+      document.getElementById("status").textContent = "Running agent…";
+      try {
+        const response = await fetch("/process-invoice", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify(payload()),
+        });
+        if (!response.ok) throw new Error(await readError(response));
+        const result = await response.json();
+        const audit = await loadAudit(result.execution_id);
+        render(result, audit);
+        document.getElementById("status").textContent = "Done.";
+      } catch (error) {
+        document.getElementById("status").textContent = String(error.message || error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.getElementById("approve-btn").addEventListener("click", async () => {
+      if (!lastExecutionId) return;
+      const button = document.getElementById("approve-btn");
+      button.disabled = true;
+      document.getElementById("status").textContent = "Recording human approval…";
+      try {
+        const response = await fetch("/executions/" + lastExecutionId + "/approve", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({
+            reviewer: "demo",
+            note: "Approved from demo UI",
+          }),
+        });
+        if (!response.ok) throw new Error(await readError(response));
+        const result = await response.json();
+        const audit = await loadAudit(lastExecutionId);
+        render({ ...result, tokens_used: audit.tokens_used, duration_ms: audit.duration_ms }, audit);
+        document.getElementById("status").textContent = "Approved.";
+      } catch (error) {
+        document.getElementById("status").textContent = String(error.message || error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

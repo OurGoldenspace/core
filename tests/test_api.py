@@ -13,6 +13,12 @@ DEMO_INVOICE = {
 }
 
 
+async def test_demo_page_is_served(client) -> None:
+    response = await client.get("/")
+    assert response.status_code == 200
+    assert "Invoice agent" in response.text
+
+
 async def test_health(client) -> None:
     response = await client.get("/health")
     assert response.status_code == 200

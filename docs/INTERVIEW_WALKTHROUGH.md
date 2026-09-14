@@ -4,8 +4,9 @@ Run the server first, then open code. Do not start in the files.
 
 ```bash
 python -m uvicorn src.app:app --host 127.0.0.1 --port 8000
-python scripts/smoke.py
 ```
+
+Open http://127.0.0.1:8000 for the demo page, then `python scripts/smoke.py` if you want the API checks too.
 
 ## 30 seconds
 

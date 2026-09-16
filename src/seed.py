@@ -25,14 +25,14 @@ async def seed_if_empty(session: AsyncSession, app_settings: Settings | None = N
 async def seed(session: AsyncSession, app_settings: Settings | None = None) -> dict:
     app_settings = app_settings or get_settings()
     vendors_path = DATA_DIR / "vendors.json"
-    departments_path = DATA_DIR / "departments.json"
-    if not vendors_path.exists() or not departments_path.exists():
+    units_path = DATA_DIR / "units.json"
+    if not vendors_path.exists() or not units_path.exists():
         raise FileNotFoundError(
-            "Missing data/vendors.json or data/departments.json. Run python data/generate_data.py first."
+            "Missing data/vendors.json or data/units.json."
         )
 
     vendors = json.loads(vendors_path.read_text(encoding="utf-8"))
-    departments = json.loads(departments_path.read_text(encoding="utf-8"))
+    units = json.loads(units_path.read_text(encoding="utf-8"))
 
     result = await session.execute(
         text(
@@ -73,27 +73,28 @@ async def seed(session: AsyncSession, app_settings: Settings | None = None) -> d
             },
         )
 
-    for item in departments:
+    for item in units:
         available = item.get("budget_available")
         if available is None:
             available = item["budget_annual"] - item.get("budget_spent", 0)
         await session.execute(
             text(
                 """
-                INSERT INTO departments (
-                    tenant_id, dept_id, name, budget_annual, budget_spent,
-                    budget_available, approval_threshold
+                INSERT INTO units (
+                    tenant_id, unit_id, name, property_name, budget_annual,
+                    budget_spent, budget_available, approval_threshold
                 )
                 VALUES (
-                    :tenant_id, :dept_id, :name, :budget_annual, :budget_spent,
-                    :budget_available, :approval_threshold
+                    :tenant_id, :unit_id, :name, :property_name, :budget_annual,
+                    :budget_spent, :budget_available, :approval_threshold
                 )
                 """
             ),
             {
                 "tenant_id": tenant_id,
-                "dept_id": item["dept_id"],
+                "unit_id": item["unit_id"],
                 "name": item["name"],
+                "property_name": item.get("property_name"),
                 "budget_annual": item["budget_annual"],
                 "budget_spent": item.get("budget_spent", 0),
                 "budget_available": available,

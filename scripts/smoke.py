@@ -17,19 +17,20 @@ def main() -> None:
     print("HEALTH", json.dumps(health))
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
-    invoice = {
-        "invoice_id": f"INV-LIVE-{run_id}",
+    payload = {
+        "request_id": f"WO-LIVE-{run_id}",
         "vendor_id": 1,
         "vendor_name": "Acme Corp Supplies",
-        "department_id": 1,
+        "unit_id": 1,
         "amount": 2500.00,
         "date": "2024-09-13",
+        "message": "Heat is out in 4B",
         "idempotency_key": f"live-key-{run_id}",
     }
     headers = {"Authorization": "Bearer test-key-12345"}
-    first = req("POST", "http://127.0.0.1:8000/process-invoice", invoice, headers)
+    first = req("POST", "http://127.0.0.1:8000/process-request", payload, headers)
     print("FIRST", json.dumps(first))
-    second = req("POST", "http://127.0.0.1:8000/process-invoice", invoice, headers)
+    second = req("POST", "http://127.0.0.1:8000/process-request", payload, headers)
     print("SECOND", json.dumps(second))
     audit = req("GET", f"http://127.0.0.1:8000/executions/{first['execution_id']}", headers=headers)
     print("TOOLS", [item["tool_name"] for item in audit["tools"]])

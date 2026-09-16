@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WorkCore Invoice Agent</title>
+  <title>WorkCore · Maintenance agent</title>
   <style>
     :root {
       --bg: #0f1419;
@@ -15,157 +15,155 @@
       --ok: #3dd68c;
       --warn: #f5c26b;
       --bad: #ff7b72;
+      --user: #243044;
     }
     * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
     body {
-      margin: 0;
       font-family: ui-sans-serif, system-ui, sans-serif;
       background: var(--bg);
       color: var(--text);
+      display: flex;
+      flex-direction: column;
     }
-    main {
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 32px 20px 64px;
+    header {
+      padding: 16px 20px 10px;
+      border-bottom: 1px solid var(--line);
     }
-    h1 { font-size: 1.4rem; margin: 0 0 6px; }
-    p.lead { color: var(--muted); margin: 0 0 24px; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
-    form, .panel {
-      background: var(--panel);
+    h1 { font-size: 1.15rem; margin: 0 0 4px; }
+    .lead { color: var(--muted); margin: 0; font-size: 0.88rem; line-height: 1.4; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .chip, button {
+      border: 0;
+      border-radius: 999px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font: inherit;
+    }
+    .chip {
+      background: transparent;
+      color: var(--muted);
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 18px;
     }
-    label { display: block; font-size: 0.8rem; color: var(--muted); margin: 10px 0 4px; }
-    input, select, textarea {
-      width: 100%;
-      padding: 8px 10px;
+    #log {
+      flex: 1;
+      overflow: auto;
+      padding: 16px 20px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .msg {
+      max-width: 720px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+    .msg.assistant { background: var(--panel); border: 1px solid var(--line); }
+    .msg.user { background: var(--user); align-self: flex-end; }
+    .msg.tool {
+      font-size: 0.82rem;
+      color: var(--muted);
+      border-left: 3px solid var(--accent);
+      background: transparent;
+      border-radius: 0;
+      padding: 4px 0 4px 10px;
+    }
+    .approved { color: var(--ok); font-weight: 700; }
+    .rejected, .error { color: var(--bad); font-weight: 700; }
+    .needs_review { color: var(--warn); font-weight: 700; }
+    form {
+      display: flex;
+      gap: 8px;
+      padding: 12px 20px 16px;
+      border-top: 1px solid var(--line);
+    }
+    textarea {
+      flex: 1;
+      min-height: 48px;
+      max-height: 120px;
+      resize: vertical;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      font: inherit;
+    }
+    button.send, button.approve {
+      border-radius: 10px;
+      background: var(--accent);
+      color: #081018;
+      font-weight: 600;
+      padding: 0 16px;
+    }
+    button.attach {
+      border-radius: 10px;
+      background: #314155;
+      color: var(--text);
+      padding: 0 12px;
+    }
+    .thumb {
+      width: 48px;
+      height: 48px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+    }
+    .msg img.preview {
+      max-width: 220px;
+      border-radius: 8px;
+      display: block;
+      margin-bottom: 6px;
+    }
+    button.approve { background: var(--warn); margin-top: 8px; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    details { margin-top: 8px; color: var(--muted); font-size: 0.78rem; }
+    details input {
+      width: 240px;
+      margin-top: 6px;
+      padding: 6px 8px;
       border-radius: 8px;
       border: 1px solid var(--line);
       background: var(--bg);
       color: var(--text);
     }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
-    button {
-      border: 0;
-      border-radius: 8px;
-      padding: 9px 14px;
-      background: var(--accent);
-      color: #081018;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    button.secondary { background: #314155; color: var(--text); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .status { font-size: 0.85rem; color: var(--muted); margin-top: 12px; }
-    .decision { font-size: 1.2rem; font-weight: 700; margin: 0 0 8px; }
-    .approved { color: var(--ok); }
-    .rejected, .error { color: var(--bad); }
-    .needs_review { color: var(--warn); }
-    pre {
-      white-space: pre-wrap;
-      font-size: 0.8rem;
-      background: var(--bg);
-      border-radius: 8px;
-      padding: 12px;
-      overflow: auto;
-      max-height: 420px;
-    }
-    .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 12px; }
   </style>
 </head>
 <body>
-  <main>
-    <h1>Invoice agent</h1>
-    <p class="lead">Submit an invoice. The agent runs tools, then returns a decision you can audit.</p>
-    <div class="grid">
-      <form id="invoice-form">
-        <label>API key</label>
-        <input id="api-key" value="test-key-12345" autocomplete="off" />
-        <label>Preset</label>
-        <select id="preset">
-          <option value="approve">Acme $2500 — expect approved</option>
-          <option value="reject">Vendor 20 $400 — expect rejected</option>
-          <option value="review">Acme $7500 — expect review</option>
-        </select>
-        <label>Invoice ID</label>
-        <input id="invoice_id" required />
-        <div class="row">
-          <div>
-            <label>Vendor ID</label>
-            <input id="vendor_id" type="number" min="1" required />
-          </div>
-          <div>
-            <label>Department ID</label>
-            <input id="department_id" type="number" min="1" required />
-          </div>
-        </div>
-        <label>Vendor name</label>
-        <input id="vendor_name" required />
-        <div class="row">
-          <div>
-            <label>Amount</label>
-            <input id="amount" type="number" min="0.01" step="0.01" required />
-          </div>
-          <div>
-            <label>Date</label>
-            <input id="date" type="date" required />
-          </div>
-        </div>
-        <label>Idempotency key</label>
-        <input id="idempotency_key" />
-        <div class="actions">
-          <button type="submit" id="submit-btn">Process invoice</button>
-          <button type="button" class="secondary" id="approve-btn" hidden>Approve review</button>
-        </div>
-        <p class="status" id="status"></p>
-      </form>
-      <section class="panel">
-        <p class="decision" id="decision">No run yet</p>
-        <p class="meta" id="meta"></p>
-        <pre id="output">Submit an invoice to see the decision and tool audit.</pre>
-      </section>
+  <header>
+    <h1>Maintenance agent</h1>
+    <p class="lead">Talk normally. The agent understands the issue, asks only for what it still needs, and can read a photo of the damage when a vision model is configured.</p>
+    <div class="chips">
+      <button type="button" class="chip" data-fill="Heat is out in 4B">Heat is out in 4B</button>
+      <button type="button" class="chip" data-fill="Send Vendor Management Inc">Unapproved contractor</button>
+      <button type="button" class="chip" data-fill="Replace the boiler, estimate $7500">Boiler $7500</button>
     </div>
-  </main>
+    <details>
+      <summary>API key</summary>
+      <input id="api-key" value="test-key-12345" autocomplete="off" />
+    </details>
+  </header>
+  <div id="log"></div>
+  <form id="chat-form">
+    <input id="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden />
+    <button class="attach" id="attach-btn" type="button">Photo</button>
+    <img id="thumb" class="thumb" alt="" hidden />
+    <textarea id="composer" placeholder="What's going on?"></textarea>
+    <button class="send" id="send-btn" type="submit">Send</button>
+  </form>
   <script>
-    const presets = {
-      approve: {
-        vendor_id: 1,
-        vendor_name: "Acme Corp Supplies",
-        department_id: 1,
-        amount: 2500,
-        date: "2024-09-13",
-      },
-      reject: {
-        vendor_id: 20,
-        vendor_name: "Vendor Management Inc",
-        department_id: 1,
-        amount: 400,
-        date: "2024-09-13",
-      },
-      review: {
-        vendor_id: 1,
-        vendor_name: "Acme Corp Supplies",
-        department_id: 1,
-        amount: 7500,
-        date: "2024-09-13",
-      },
-    };
-
-    const fields = [
-      "invoice_id",
-      "vendor_id",
-      "vendor_name",
-      "department_id",
-      "amount",
-      "date",
-      "idempotency_key",
-    ];
-
+    const log = document.getElementById("log");
+    const composer = document.getElementById("composer");
+    const sendBtn = document.getElementById("send-btn");
+    const photoInput = document.getElementById("photo");
+    const thumb = document.getElementById("thumb");
+    const messages = [];
+    let draft = {};
     let lastExecutionId = null;
+    let busy = false;
+    let pendingImage = null;
 
     function authHeaders() {
       return {
@@ -174,123 +172,183 @@
       };
     }
 
-    function applyPreset() {
-      const preset = presets[document.getElementById("preset").value];
-      const stamp = Date.now();
-      document.getElementById("invoice_id").value = "INV-UI-" + stamp;
-      document.getElementById("vendor_id").value = preset.vendor_id;
-      document.getElementById("vendor_name").value = preset.vendor_name;
-      document.getElementById("department_id").value = preset.department_id;
-      document.getElementById("amount").value = preset.amount;
-      document.getElementById("date").value = preset.date;
-      document.getElementById("idempotency_key").value = "ui-" + stamp;
-    }
-
-    function payload() {
-      const body = {};
-      for (const name of fields) {
-        const value = document.getElementById(name).value;
-        if (name === "vendor_id" || name === "department_id") body[name] = Number(value);
-        else if (name === "amount") body[name] = Number(value);
-        else body[name] = value;
+    function addMessage(role, text, extraClass, imageUrl) {
+      const el = document.createElement("div");
+      el.className = "msg " + role + (extraClass ? " " + extraClass : "");
+      if (imageUrl) {
+        const img = document.createElement("img");
+        img.className = "preview";
+        img.src = imageUrl;
+        img.alt = "Attached photo";
+        el.appendChild(img);
       }
-      return body;
+      if (text) el.appendChild(document.createTextNode(text));
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
     }
 
-    async function readError(response) {
-      try {
-        const body = await response.json();
-        return JSON.stringify(body, null, 2);
-      } catch {
-        return await response.text();
+    function addTool(text) {
+      addMessage("tool", text);
+    }
+
+    async function readSse(response, onEvent) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() || "";
+        for (const block of blocks) {
+          let eventType = "message";
+          const dataLines = [];
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event:")) eventType = line.slice(6).trim();
+            if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+          }
+          if (!dataLines.length) continue;
+          await onEvent(eventType, JSON.parse(dataLines.join("\n")));
+        }
       }
     }
 
-    async function loadAudit(executionId) {
-      const response = await fetch("/executions/" + executionId, {
-        headers: authHeaders(),
+    addMessage(
+      "assistant",
+      "Tell me what's going on — in your own words, or attach a photo. I'll need a unit, contractor, estimate, and date before I can file a work order."
+    );
+
+    document.querySelectorAll("[data-fill]").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        composer.value = chip.getAttribute("data-fill") || "";
+        composer.focus();
       });
-      if (!response.ok) throw new Error(await readError(response));
-      return response.json();
-    }
+    });
 
-    function render(result, audit) {
-      lastExecutionId = result.execution_id;
-      const decision = result.decision || "unknown";
-      const el = document.getElementById("decision");
-      el.textContent = decision;
-      el.className = "decision " + decision;
-      document.getElementById("meta").textContent =
-        "execution " + result.execution_id +
-        " · " + (result.tokens_used || 0) + " tokens" +
-        " · " + (result.duration_ms || 0) + " ms" +
-        (result.cached ? " · cached" : "");
-      document.getElementById("output").textContent = JSON.stringify(
-        {
-          decision: result.decision,
-          reason: result.reason,
-          tools: (audit.tools || []).map((tool) => ({
-            tool: tool.tool_name,
-            output: tool.output,
-          })),
-        },
-        null,
-        2
-      );
-      document.getElementById("approve-btn").hidden = decision !== "needs_review";
-    }
+    document.getElementById("attach-btn").addEventListener("click", () => photoInput.click());
+    photoInput.addEventListener("change", async () => {
+      const file = photoInput.files && photoInput.files[0];
+      if (!file) return;
+      pendingImage = await fileToImage(file);
+      thumb.src = "data:" + pendingImage.media_type + ";base64," + pendingImage.data;
+      thumb.hidden = false;
+    });
 
-    document.getElementById("preset").addEventListener("change", applyPreset);
-    applyPreset();
-
-    document.getElementById("invoice-form").addEventListener("submit", async (event) => {
+    document.getElementById("chat-form").addEventListener("submit", async (event) => {
       event.preventDefault();
-      const button = document.getElementById("submit-btn");
-      button.disabled = true;
-      document.getElementById("status").textContent = "Running agent…";
+      const text = composer.value.trim();
+      if ((!text && !pendingImage) || busy) return;
+      busy = true;
+      sendBtn.disabled = true;
+      composer.value = "";
+      const image = pendingImage;
+      pendingImage = null;
+      photoInput.value = "";
+      thumb.hidden = true;
+      const preview = image ? "data:" + image.media_type + ";base64," + image.data : null;
+      addMessage("user", text || "Photo of the issue", "", preview);
+      messages.push({ role: "user", content: text || "I attached a photo of the issue." });
+      lastExecutionId = null;
       try {
-        const response = await fetch("/process-invoice", {
+        const response = await fetch("/chat/stream", {
           method: "POST",
           headers: authHeaders(),
-          body: JSON.stringify(payload()),
+          body: JSON.stringify({ messages, draft, image }),
         });
-        if (!response.ok) throw new Error(await readError(response));
-        const result = await response.json();
-        const audit = await loadAudit(result.execution_id);
-        render(result, audit);
-        document.getElementById("status").textContent = "Done.";
+        if (!response.ok) throw new Error(await response.text());
+        let assistantText = "";
+        await readSse(response, async (type, data) => {
+          if (data.draft) draft = data.draft;
+          if (type === "ask" || type === "working") {
+            assistantText = data.text;
+            addMessage("assistant", data.text);
+            messages.push({ role: "assistant", content: data.text });
+          }
+          if (type === "started") {
+            lastExecutionId = data.execution_id;
+            addTool("Started PMS checks");
+          }
+          if (type === "tools") {
+            addTool("Tools: " + (data.names || []).join(", "));
+          }
+          if (type === "decision") {
+            lastExecutionId = lastExecutionId || data.execution_id;
+            const bubble = addMessage("assistant", data.decision + " — " + data.reason, data.decision);
+            messages.push({ role: "assistant", content: bubble.textContent });
+            if (data.decision === "needs_review") {
+              const button = document.createElement("button");
+              button.className = "approve";
+              button.type = "button";
+              button.textContent = "Approve review";
+              button.addEventListener("click", () => approveReview(button));
+              bubble.appendChild(document.createElement("br"));
+              bubble.appendChild(button);
+            }
+          }
+          if (type === "error") {
+            addMessage("assistant", data.reason || "Something went wrong", "error");
+          }
+        });
+        if (!assistantText) {
+          /* decision events already rendered */
+        }
       } catch (error) {
-        document.getElementById("status").textContent = String(error.message || error);
+        addMessage("assistant", String(error.message || error), "error");
       } finally {
-        button.disabled = false;
+        busy = false;
+        sendBtn.disabled = false;
+        composer.focus();
       }
     });
 
-    document.getElementById("approve-btn").addEventListener("click", async () => {
+    composer.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        document.getElementById("chat-form").requestSubmit();
+      }
+    });
+
+    async function fileToImage(file) {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Could not read photo"));
+        reader.readAsDataURL(file);
+      });
+      const image = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("Could not load photo"));
+        img.src = dataUrl;
+      });
+      const scale = Math.min(1, 1280 / Math.max(image.width, image.height));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+      const jpeg = canvas.toDataURL("image/jpeg", 0.72);
+      return { media_type: "image/jpeg", data: jpeg.split(",")[1] };
+    }
+
+    async function approveReview(button) {
       if (!lastExecutionId) return;
-      const button = document.getElementById("approve-btn");
       button.disabled = true;
-      document.getElementById("status").textContent = "Recording human approval…";
       try {
         const response = await fetch("/executions/" + lastExecutionId + "/approve", {
           method: "POST",
           headers: authHeaders(),
-          body: JSON.stringify({
-            reviewer: "demo",
-            note: "Approved from demo UI",
-          }),
+          body: JSON.stringify({ reviewer: "demo", note: "Approved from chat" }),
         });
-        if (!response.ok) throw new Error(await readError(response));
+        if (!response.ok) throw new Error(await response.text());
         const result = await response.json();
-        const audit = await loadAudit(lastExecutionId);
-        render({ ...result, tokens_used: audit.tokens_used, duration_ms: audit.duration_ms }, audit);
-        document.getElementById("status").textContent = "Approved.";
+        addMessage("assistant", result.decision + " — " + result.reason, result.decision);
       } catch (error) {
-        document.getElementById("status").textContent = String(error.message || error);
-      } finally {
+        addMessage("assistant", String(error.message || error), "error");
         button.disabled = false;
       }
-    });
+    }
   </script>
 </body>
 </html>

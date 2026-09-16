@@ -39,7 +39,7 @@ def session_factory(url: str):
 
 async def test_postgres_skip_locked_has_one_winner() -> None:
     suffix = uuid.uuid4().hex[:10]
-    invoice_id = f"INV-PG-RACE-{suffix}"
+    request_id = f"INV-PG-RACE-{suffix}"
     admin_engine, admin_factory = session_factory(ADMIN_URL)
     tenant_id = None
     try:
@@ -58,17 +58,17 @@ async def test_postgres_skip_locked_has_one_winner() -> None:
             await session.execute(
                 text(
                     """
-                    INSERT INTO jobs (tenant_id, invoice_id, status)
-                    VALUES (:tenant_id, :invoice_id, 'pending')
+                    INSERT INTO jobs (tenant_id, request_id, status)
+                    VALUES (:tenant_id, :request_id, 'pending')
                     """
                 ),
-                {"tenant_id": tenant_id, "invoice_id": invoice_id},
+                {"tenant_id": tenant_id, "request_id": request_id},
             )
             await session.commit()
 
         async def claim(worker_id: int):
             async with admin_factory() as session:
-                return await Database(session).claim_job(tenant_id, invoice_id, worker_id)
+                return await Database(session).claim_job(tenant_id, request_id, worker_id)
 
         results = await asyncio.gather(*[claim(worker_id) for worker_id in range(50)])
         assert len([job_id for job_id in results if job_id is not None]) == 1

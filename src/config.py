@@ -40,6 +40,10 @@ class Settings:
         return self._get("GROQ_MODEL", "openai/gpt-oss-20b")
 
     @property
+    def GROQ_VISION_MODEL(self) -> str:
+        return self._get("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+
+    @property
     def LLM_PROVIDER(self) -> str:
         return self._get("LLM_PROVIDER", "auto").strip().lower()
 

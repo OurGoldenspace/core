@@ -1,4 +1,4 @@
-"""Initial durable invoice-agent runtime.
+"""Initial durable maintenance-agent runtime.
 
 Revision ID: 0001
 Revises: None
@@ -41,23 +41,24 @@ def upgrade() -> None:
         sa.UniqueConstraint("tenant_id", "vendor_id"),
     )
     op.create_table(
-        "departments",
+        "units",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("tenants.id"), nullable=False),
-        sa.Column("dept_id", sa.Integer(), nullable=False),
+        sa.Column("unit_id", sa.Integer(), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
+        sa.Column("property_name", sa.String(255)),
         sa.Column("budget_annual", sa.Numeric(12, 2)),
         sa.Column("budget_spent", sa.Numeric(12, 2), server_default="0"),
         sa.Column("budget_available", sa.Numeric(12, 2)),
         sa.Column("approval_threshold", sa.Numeric(12, 2)),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.UniqueConstraint("tenant_id", "dept_id"),
+        sa.UniqueConstraint("tenant_id", "unit_id"),
     )
     op.create_table(
         "jobs",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("tenants.id"), nullable=False),
-        sa.Column("invoice_id", sa.String(255), nullable=False),
+        sa.Column("request_id", sa.String(255), nullable=False),
         sa.Column("status", sa.String(50), nullable=False, server_default="pending"),
         sa.Column("claimed_by", sa.Integer()),
         sa.Column("claimed_at", sa.DateTime()),
@@ -71,7 +72,7 @@ def upgrade() -> None:
             name="ck_jobs_status",
         ),
         sa.CheckConstraint("retry_count >= 0", name="ck_jobs_retry_count"),
-        sa.UniqueConstraint("tenant_id", "invoice_id"),
+        sa.UniqueConstraint("tenant_id", "request_id"),
     )
     op.create_index("idx_jobs_status_created", "jobs", ["tenant_id", "status", "created_at"])
     op.create_table(
@@ -80,11 +81,11 @@ def upgrade() -> None:
         sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("tenants.id"), nullable=False),
         sa.Column("job_id", sa.Integer(), sa.ForeignKey("jobs.id"), nullable=False),
         sa.Column("idempotency_key", sa.String(255)),
-        sa.Column("invoice_id", sa.String(255), nullable=False),
+        sa.Column("request_id", sa.String(255), nullable=False),
         sa.Column("vendor_id", sa.Integer(), nullable=False),
-        sa.Column("department_id", sa.Integer(), nullable=False),
+        sa.Column("unit_id", sa.Integer(), nullable=False),
         sa.Column("amount", sa.Numeric(12, 2), nullable=False),
-        sa.Column("invoice_date", sa.Date(), nullable=False),
+        sa.Column("reported_date", sa.Date(), nullable=False),
         sa.Column("state", sa.String(50), nullable=False, server_default="running"),
         sa.Column("decision", sa.String(50)),
         sa.Column("reason", sa.Text()),
@@ -107,7 +108,7 @@ def upgrade() -> None:
         ["tenant_id", sa.text("started_at DESC")],
     )
     op.create_table(
-        "payments",
+        "work_orders",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("tenant_id", sa.Integer(), sa.ForeignKey("tenants.id"), nullable=False),
         sa.Column(
@@ -116,19 +117,19 @@ def upgrade() -> None:
             sa.ForeignKey("executions.id"),
             nullable=False,
         ),
-        sa.Column("invoice_id", sa.String(255), nullable=False),
+        sa.Column("request_id", sa.String(255), nullable=False),
         sa.Column("vendor_id", sa.Integer(), nullable=False),
         sa.Column("amount", sa.Numeric(12, 2), nullable=False),
         sa.Column("idempotency_key", sa.String(255), nullable=False),
         sa.Column("transaction_id", sa.String(255), nullable=False),
         sa.Column("status", sa.String(50), nullable=False, server_default="pending"),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP")),
-        sa.CheckConstraint("amount > 0", name="ck_payments_amount"),
-        sa.CheckConstraint("status IN ('pending','succeeded','failed')", name="ck_payments_status"),
-        sa.UniqueConstraint("tenant_id", "invoice_id"),
+        sa.CheckConstraint("amount > 0", name="ck_work_orders_amount"),
+        sa.CheckConstraint("status IN ('pending','succeeded','failed')", name="ck_work_orders_status"),
+        sa.UniqueConstraint("tenant_id", "request_id"),
         sa.UniqueConstraint("tenant_id", "idempotency_key"),
     )
-    op.create_index("idx_payments_execution", "payments", ["execution_id"])
+    op.create_index("idx_work_orders_execution", "work_orders", ["execution_id"])
     op.create_table(
         "tool_invocations",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -178,9 +179,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("llm_calls")
     op.drop_table("tool_invocations")
-    op.drop_table("payments")
+    op.drop_table("work_orders")
     op.drop_table("executions")
     op.drop_table("jobs")
-    op.drop_table("departments")
+    op.drop_table("units")
     op.drop_table("vendors")
     op.drop_table("tenants")

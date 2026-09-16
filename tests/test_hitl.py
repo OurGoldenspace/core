@@ -8,18 +8,18 @@ from src.database import Database, get_session_factory
 
 AUTH = {"Authorization": "Bearer test-key-12345"}
 
-REVIEW_INVOICE = {
-    "invoice_id": "INV-HITL-7500",
+REVIEW_REQUEST = {
+    "request_id": "INV-HITL-7500",
     "vendor_id": 1,
     "vendor_name": "Acme Corp Supplies",
-    "department_id": 1,
+    "unit_id": 1,
     "amount": 7500.00,
     "date": "2024-09-13",
 }
 
 
 async def test_human_can_approve_review_queue(client) -> None:
-    created = await client.post("/process-invoice", headers=AUTH, json=REVIEW_INVOICE)
+    created = await client.post("/process-request", headers=AUTH, json=REVIEW_REQUEST)
     assert created.json()["decision"] == "needs_review"
     execution_id = created.json()["execution_id"]
     pending = await client.get(f"/executions/{execution_id}", headers=AUTH)
@@ -44,16 +44,16 @@ async def test_human_can_approve_review_queue(client) -> None:
         db = Database(session)
         job = await db.get_job(audit.json()["job_id"])
         tenant = await db.get_tenant_by_api_key("test-key-12345")
-        payments = await db.list_payments(tenant["id"], REVIEW_INVOICE["invoice_id"])
+        payments = await db.list_work_orders(tenant["id"], REVIEW_REQUEST["request_id"])
     assert job["status"] == "completed"
     assert len(payments) == 1
 
 
 async def test_human_can_reject_review_queue(client) -> None:
     created = await client.post(
-        "/process-invoice",
+        "/process-request",
         headers=AUTH,
-        json={**REVIEW_INVOICE, "invoice_id": "INV-HITL-REJECT"},
+        json={**REVIEW_REQUEST, "request_id": "INV-HITL-REJECT"},
     )
     execution_id = created.json()["execution_id"]
     rejected = await client.post(
@@ -67,13 +67,13 @@ async def test_human_can_reject_review_queue(client) -> None:
 
 async def test_cannot_approve_already_decided(client) -> None:
     created = await client.post(
-        "/process-invoice",
+        "/process-request",
         headers=AUTH,
         json={
-            "invoice_id": "INV-HITL-ALREADY",
+            "request_id": "INV-HITL-ALREADY",
             "vendor_id": 1,
             "vendor_name": "Acme Corp Supplies",
-            "department_id": 1,
+            "unit_id": 1,
             "amount": 2500.00,
             "date": "2024-09-13",
         },
@@ -89,9 +89,9 @@ async def test_cannot_approve_already_decided(client) -> None:
 
 async def test_two_human_approvers_create_one_payment(client) -> None:
     created = await client.post(
-        "/process-invoice",
+        "/process-request",
         headers=AUTH,
-        json={**REVIEW_INVOICE, "invoice_id": "INV-HITL-RACE"},
+        json={**REVIEW_REQUEST, "request_id": "INV-HITL-RACE"},
     )
     execution_id = created.json()["execution_id"]
 
@@ -111,6 +111,6 @@ async def test_two_human_approvers_create_one_payment(client) -> None:
     async with factory() as session:
         db = Database(session)
         tenant = await db.get_tenant_by_api_key("test-key-12345")
-        payments = await db.list_payments(tenant["id"], "INV-HITL-RACE")
+        payments = await db.list_work_orders(tenant["id"], "INV-HITL-RACE")
     assert len(payments) == 1
     assert payments[0]["status"] == "succeeded"

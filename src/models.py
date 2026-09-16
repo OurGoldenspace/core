@@ -9,10 +9,10 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class InvoiceDecision(str, Enum):
+class RequestDecision(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     NEEDS_REVIEW = "needs_review"
@@ -25,8 +25,8 @@ class AgentDecisionOutput(BaseModel):
     reason: str = Field(..., min_length=1, max_length=500)
 
 
-class ProcessInvoiceRequest(BaseModel):
-    invoice_id: str = Field(
+class ProcessRequest(BaseModel):
+    request_id: str = Field(
         ...,
         min_length=1,
         max_length=50,
@@ -34,9 +34,10 @@ class ProcessInvoiceRequest(BaseModel):
     )
     vendor_id: int = Field(..., gt=0, lt=1_000_000)
     vendor_name: str = Field(..., min_length=1, max_length=255)
-    department_id: int = Field(..., gt=0, lt=1_000)
+    unit_id: int = Field(..., gt=0, lt=1_000)
     amount: Decimal = Field(..., gt=0, max_digits=12, decimal_places=2)
     date: str
+    message: str = Field(default="", max_length=4_000)
     idempotency_key: Optional[str] = None
 
     @field_validator("amount")
@@ -56,9 +57,48 @@ class ProcessInvoiceRequest(BaseModel):
         return value
 
 
-class ProcessInvoiceResponse(BaseModel):
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(default="", max_length=4_000)
+
+
+class ChatImage(BaseModel):
+    media_type: Literal["image/jpeg", "image/png", "image/webp", "image/gif"]
+    data: str = Field(..., min_length=8, max_length=4_000_000)
+
+
+class IntakeDraft(BaseModel):
+    message: str = ""
+    unit_id: Optional[int] = None
+    unit_label: str = ""
+    vendor_id: Optional[int] = None
+    vendor_name: str = ""
+    amount: Optional[Decimal] = None
+    date: str = ""
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage] = Field(..., min_length=1, max_length=40)
+    draft: IntakeDraft = Field(default_factory=IntakeDraft)
+    image: Optional[ChatImage] = None
+
+    @field_validator("messages")
+    @classmethod
+    def last_message_is_user(cls, value: list[ChatMessage]) -> list[ChatMessage]:
+        if value[-1].role != "user":
+            raise ValueError("last message must be from the user")
+        return value
+
+    @model_validator(mode="after")
+    def require_text_or_image(self) -> "ChatRequest":
+        if not self.messages[-1].content.strip() and self.image is None:
+            raise ValueError("Send a message or a photo")
+        return self
+
+
+class ProcessRequestResponse(BaseModel):
     execution_id: int
-    invoice_id: str
+    request_id: str
     decision: str
     reason: str
     iterations: int
@@ -138,8 +178,8 @@ class ValidateVendorInput(BaseModel):
     vendor_id: int = Field(..., gt=0, lt=1_000_000)
 
 
-class CheckBudgetInput(BaseModel):
-    department_id: int = Field(..., gt=0, lt=1_000)
+class LookupUnitInput(BaseModel):
+    unit_id: int = Field(..., gt=0, lt=1_000)
     amount: Decimal = Field(..., gt=0, max_digits=12, decimal_places=2)
 
     @field_validator("amount")
@@ -150,8 +190,8 @@ class CheckBudgetInput(BaseModel):
         return value
 
 
-class DetectDuplicatesInput(BaseModel):
-    vendor_id: int = Field(..., gt=0, lt=1_000_000)
+class DetectOpenWorkOrdersInput(BaseModel):
+    unit_id: int = Field(..., gt=0, lt=1_000)
     amount: Decimal = Field(..., gt=0, max_digits=12, decimal_places=2)
     date: str
 
@@ -165,8 +205,8 @@ class DetectDuplicatesInput(BaseModel):
         return value
 
 
-class ProcessPaymentInput(BaseModel):
-    invoice_id: str = Field(..., min_length=1, max_length=50)
+class CreateWorkOrderInput(BaseModel):
+    request_id: str = Field(..., min_length=1, max_length=50)
     vendor_id: int = Field(..., gt=0, lt=1_000_000)
     amount: Decimal = Field(..., gt=0, max_digits=12, decimal_places=2)
 
@@ -177,20 +217,21 @@ class ValidateVendorOutput(BaseModel):
     reason: str
 
 
-class CheckBudgetOutput(BaseModel):
+class LookupUnitOutput(BaseModel):
+    found: bool
     has_budget: bool
     available: Decimal
     required: Decimal
     reason: str
 
 
-class DetectDuplicatesOutput(BaseModel):
+class DetectOpenWorkOrdersOutput(BaseModel):
     is_duplicate: bool
-    matching_invoices: list[str]
+    matching_requests: list[str]
     reason: str
 
 
-class ProcessPaymentOutput(BaseModel):
+class CreateWorkOrderOutput(BaseModel):
     success: bool
     transaction_id: Optional[str]
     reason: str

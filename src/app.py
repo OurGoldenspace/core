@@ -14,17 +14,19 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agent import process_invoice_workflow
+from src.agent import process_request_workflow
 from src.config import settings
 from src.database import AsyncSessionLocal, Database, get_db_session, init_db
+from src.intake import interpret_turn, missing_slots
 from src.models import (
     BackgroundJobResponse,
+    ChatRequest,
     HumanReviewRequest,
     HumanReviewResponse,
     IngestDocumentRequest,
     IngestDocumentResponse,
-    ProcessInvoiceRequest,
-    ProcessInvoiceResponse,
+    ProcessRequest,
+    ProcessRequestResponse,
     RetrievalRequest,
     RetrievalResponse,
 )
@@ -43,8 +45,8 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="WorkCore Invoice Agent",
-    description="ReACT invoice agent with parallel tools, idempotency, human review, and an audit trail.",
+    title="WorkCore Maintenance Agent",
+    description="ReACT maintenance agent with parallel tools, idempotency, human review, and an audit trail.",
     version="1.1.0",
     lifespan=lifespan,
 )
@@ -71,17 +73,17 @@ async def current_tenant(
 
 def _to_response(
     execution_id: int,
-    invoice_id: str,
+    request_id: str,
     decision: str,
     reason: str,
     iterations: int,
     tokens_used: int,
     duration_ms: int,
     cached: bool = False,
-) -> ProcessInvoiceResponse:
-    return ProcessInvoiceResponse(
+) -> ProcessRequestResponse:
+    return ProcessRequestResponse(
         execution_id=execution_id,
-        invoice_id=invoice_id,
+        request_id=request_id,
         decision=decision,
         reason=reason,
         iterations=iterations,
@@ -91,20 +93,20 @@ def _to_response(
     )
 
 
-def _execution_matches_invoice(execution: dict, invoice: ProcessInvoiceRequest) -> bool:
+def _execution_matches_request(execution: dict, request: ProcessRequest) -> bool:
     return (
-        execution["invoice_id"] == invoice.invoice_id
-        and execution["vendor_id"] == invoice.vendor_id
-        and execution["department_id"] == invoice.department_id
-        and Decimal(str(execution["amount"])) == invoice.amount
-        and execution["invoice_date"] in (None, invoice.date)
+        execution["request_id"] == request.request_id
+        and execution["vendor_id"] == request.vendor_id
+        and execution["unit_id"] == request.unit_id
+        and Decimal(str(execution["amount"])) == request.amount
+        and execution["reported_date"] in (None, request.date)
     )
 
 
-def _cached_response(execution: dict) -> ProcessInvoiceResponse:
+def _cached_response(execution: dict) -> ProcessRequestResponse:
     return _to_response(
         execution["id"],
-        execution["invoice_id"],
+        execution["request_id"],
         execution["decision"],
         execution["reason"] or "",
         execution["iterations"] or 0,
@@ -114,46 +116,46 @@ def _cached_response(execution: dict) -> ProcessInvoiceResponse:
     )
 
 
-async def run_invoice_execution(
+async def run_request_execution(
     db: Database,
     tenant: dict,
-    invoice: ProcessInvoiceRequest,
+    request: ProcessRequest,
     on_event=None,
-) -> ProcessInvoiceResponse:
+) -> ProcessRequestResponse:
     started = time.perf_counter()
 
-    if invoice.idempotency_key:
-        cached = await db.get_execution_by_idempotency_key(tenant["id"], invoice.idempotency_key)
+    if request.idempotency_key:
+        cached = await db.get_execution_by_idempotency_key(tenant["id"], request.idempotency_key)
         if cached is not None:
-            if not _execution_matches_invoice(cached, invoice):
+            if not _execution_matches_request(cached, request):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
-                    detail="Idempotency key was already used for a different invoice payload",
+                    detail="Idempotency key was already used for a different request payload",
                 )
             if cached["state"] != "running":
                 return _cached_response(cached)
 
-    department = await db.get_department(tenant["id"], invoice.department_id)
-    department_name = department["name"] if department else f"Department {invoice.department_id}"
+    unit = await db.get_unit(tenant["id"], request.unit_id)
+    unit_name = unit["name"] if unit else f"Unit {request.unit_id}"
 
-    job_id = await db.create_job(tenant["id"], invoice.invoice_id)
+    job_id = await db.create_job(tenant["id"], request.request_id)
     execution_id, is_owner = await db.acquire_execution(
         tenant_id=tenant["id"],
         job_id=job_id,
-        idempotency_key=invoice.idempotency_key,
-        invoice_id=invoice.invoice_id,
-        vendor_id=invoice.vendor_id,
-        department_id=invoice.department_id,
-        amount=invoice.amount,
-        invoice_date=invoice.date,
+        idempotency_key=request.idempotency_key,
+        request_id=request.request_id,
+        vendor_id=request.vendor_id,
+        unit_id=request.unit_id,
+        amount=request.amount,
+        reported_date=request.date,
     )
     existing = await db.get_execution(tenant["id"], execution_id)
     if existing is None:
         raise HTTPException(status_code=500, detail="Execution ownership could not be resolved")
-    if not _execution_matches_invoice(existing, invoice):
+    if not _execution_matches_request(existing, request):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Invoice ID was already used for a different payload",
+            detail="Request ID was already used for a different payload",
         )
 
     if not is_owner:
@@ -169,7 +171,7 @@ async def run_invoice_execution(
             )
         return _cached_response(completed)
 
-    claimed_job_id = await db.claim_job(tenant["id"], invoice.invoice_id, worker_id=1)
+    claimed_job_id = await db.claim_job(tenant["id"], request.request_id, worker_id=1)
     if claimed_job_id != job_id:
         await db.update_execution_complete(
             execution_id,
@@ -181,20 +183,21 @@ async def run_invoice_execution(
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Invoice is already owned by another worker",
+            detail="Request is already owned by another worker",
         )
 
-    decision, reason, iterations, tokens_used = await process_invoice_workflow(
+    decision, reason, iterations, tokens_used = await process_request_workflow(
         db=db,
         tenant_id=tenant["id"],
         execution_id=execution_id,
-        invoice_id=invoice.invoice_id,
-        vendor_id=invoice.vendor_id,
-        department_id=invoice.department_id,
-        amount=invoice.amount,
-        date=invoice.date,
-        department_name=department_name,
-        vendor_name=invoice.vendor_name,
+        request_id=request.request_id,
+        vendor_id=request.vendor_id,
+        unit_id=request.unit_id,
+        amount=request.amount,
+        date=request.date,
+        unit_name=unit_name,
+        vendor_name=request.vendor_name,
+        message=request.message,
         on_event=on_event,
     )
     duration_ms = int((time.perf_counter() - started) * 1000)
@@ -215,13 +218,47 @@ async def run_invoice_execution(
 
     return _to_response(
         execution_id,
-        invoice.invoice_id,
+        request.request_id,
         str(decision),
         reason,
         iterations,
         tokens_used,
         duration_ms,
     )
+
+
+def _sse_line(event: dict) -> str:
+    return f"event: {event.get('type', 'message')}\ndata: {json.dumps(event, default=str)}\n\n"
+
+
+def _execution_stream(session: AsyncSession, tenant: dict, request: ProcessRequest):
+    queue: asyncio.Queue[dict | None] = asyncio.Queue()
+
+    async def on_event(event: dict) -> None:
+        await queue.put(event)
+
+    async def run() -> None:
+        try:
+            result = await run_request_execution(Database(session), tenant, request, on_event=on_event)
+            await session.commit()
+            await queue.put({"type": "done", **result.model_dump()})
+        except Exception as error:
+            await queue.put({"type": "error", "reason": str(error)})
+        finally:
+            await queue.put(None)
+
+    async def events():
+        task = asyncio.create_task(run())
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                yield _sse_line(event)
+        finally:
+            await task
+
+    return StreamingResponse(events(), media_type="text/event-stream")
 
 
 @app.get("/", include_in_schema=False)
@@ -278,54 +315,54 @@ async def retrieve_documents(
     return RetrievalResponse(results=results)
 
 
-@app.post("/process-invoice", response_model=ProcessInvoiceResponse)
-async def process_invoice(
-    invoice: ProcessInvoiceRequest,
+@app.post("/process-request", response_model=ProcessRequestResponse)
+async def process_request(
+    request: ProcessRequest,
     tenant: dict = Depends(current_tenant),
     session: AsyncSession = Depends(get_db_session),
-) -> ProcessInvoiceResponse:
-    return await run_invoice_execution(Database(session), tenant, invoice)
+) -> ProcessRequestResponse:
+    return await run_request_execution(Database(session), tenant, request)
 
 
 @app.post(
-    "/invoice-jobs",
+    "/request-jobs",
     response_model=BackgroundJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def enqueue_invoice(
-    invoice: ProcessInvoiceRequest,
+async def enqueue_request(
+    request: ProcessRequest,
     tenant: dict = Depends(current_tenant),
     session: AsyncSession = Depends(get_db_session),
 ) -> BackgroundJobResponse:
     """Persist work and return immediately; `python -m src.worker` executes it."""
     db = Database(session)
-    if invoice.idempotency_key:
+    if request.idempotency_key:
         existing = await db.get_execution_by_idempotency_key(
             tenant["id"],
-            invoice.idempotency_key,
+            request.idempotency_key,
         )
-        if existing is not None and not _execution_matches_invoice(existing, invoice):
+        if existing is not None and not _execution_matches_request(existing, request):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Idempotency key was already used for a different invoice payload",
+                detail="Idempotency key was already used for a different request payload",
             )
 
-    job_id = await db.create_job(tenant["id"], invoice.invoice_id)
+    job_id = await db.create_job(tenant["id"], request.request_id)
     execution_id, is_owner = await db.acquire_execution(
         tenant_id=tenant["id"],
         job_id=job_id,
-        idempotency_key=invoice.idempotency_key,
-        invoice_id=invoice.invoice_id,
-        vendor_id=invoice.vendor_id,
-        department_id=invoice.department_id,
-        amount=invoice.amount,
-        invoice_date=invoice.date,
+        idempotency_key=request.idempotency_key,
+        request_id=request.request_id,
+        vendor_id=request.vendor_id,
+        unit_id=request.unit_id,
+        amount=request.amount,
+        reported_date=request.date,
     )
     execution = await db.get_execution(tenant["id"], execution_id)
-    if execution is None or not _execution_matches_invoice(execution, invoice):
+    if execution is None or not _execution_matches_request(execution, request):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Invoice ID was already used for a different payload",
+            detail="Request ID was already used for a different payload",
         )
     job = await db.get_job(job_id)
     return BackgroundJobResponse(
@@ -337,8 +374,8 @@ async def enqueue_invoice(
     )
 
 
-@app.get("/invoice-jobs/{job_id}", response_model=BackgroundJobResponse)
-async def get_invoice_job(
+@app.get("/request-jobs/{job_id}", response_model=BackgroundJobResponse)
+async def get_request_job(
     job_id: int,
     tenant: dict = Depends(current_tenant),
     session: AsyncSession = Depends(get_db_session),
@@ -359,9 +396,9 @@ async def get_invoice_job(
     )
 
 
-@app.post("/process-invoice/stream")
-async def process_invoice_stream(
-    invoice: ProcessInvoiceRequest,
+@app.post("/process-request/stream")
+async def process_request_stream(
+    request: ProcessRequest,
     tenant: dict = Depends(current_tenant),
     session: AsyncSession = Depends(get_db_session),
 ):
@@ -373,6 +410,53 @@ async def process_invoice_stream(
     With Anthropic configured, model_delta contains real provider token
     chunks. The policy fallback has no artificial text stream.
     """
+    return _execution_stream(session, tenant, request)
+
+
+@app.post("/chat/stream")
+async def chat_stream(
+    body: ChatRequest,
+    tenant: dict = Depends(current_tenant),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """Collect missing maintenance details in chat, then run the same agent loop."""
+    db = Database(session)
+    units = await db.list_units(tenant["id"])
+    vendors = await db.list_vendors(tenant["id"])
+    image = None if body.image is None else body.image.model_dump()
+    draft, reply, ready = await interpret_turn(
+        draft=body.draft.model_dump(),
+        user_text=body.messages[-1].content,
+        units=units,
+        vendors=vendors,
+        history=[item.model_dump() for item in body.messages[:-1]],
+        image=image,
+    )
+    if not ready:
+        async def ask():
+            yield _sse_line(
+                {
+                    "type": "ask",
+                    "text": reply,
+                    "draft": draft,
+                    "missing": missing_slots(draft),
+                }
+            )
+
+        return StreamingResponse(ask(), media_type="text/event-stream")
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+    request = ProcessRequest(
+        request_id=f"WO-CHAT-{stamp}",
+        vendor_id=int(draft["vendor_id"]),
+        vendor_name=str(draft["vendor_name"]),
+        unit_id=int(draft["unit_id"]),
+        amount=Decimal(str(draft["amount"])),
+        date=str(draft["date"]),
+        message=str(draft["message"]),
+        idempotency_key=f"chat-{stamp}",
+    )
+
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
 
     async def on_event(event: dict) -> None:
@@ -380,7 +464,8 @@ async def process_invoice_stream(
 
     async def run() -> None:
         try:
-            result = await run_invoice_execution(Database(session), tenant, invoice, on_event=on_event)
+            result = await run_request_execution(Database(session), tenant, request, on_event=on_event)
+            await session.commit()
             await queue.put({"type": "done", **result.model_dump()})
         except Exception as error:
             await queue.put({"type": "error", "reason": str(error)})
@@ -388,13 +473,14 @@ async def process_invoice_stream(
             await queue.put(None)
 
     async def events():
+        yield _sse_line({"type": "working", "text": reply, "draft": draft})
         task = asyncio.create_task(run())
         try:
             while True:
                 event = await queue.get()
                 if event is None:
                     break
-                yield f"event: {event.get('type', 'message')}\ndata: {json.dumps(event, default=str)}\n\n"
+                yield _sse_line(event)
         finally:
             await task
 
@@ -422,7 +508,7 @@ async def approve_execution(
     tenant: dict = Depends(current_tenant),
     session: AsyncSession = Depends(get_db_session),
 ) -> HumanReviewResponse:
-    """A person must confirm anything at or above the $5000 threshold."""
+    """A person must confirm anything at or above the $5000 owner-approval threshold."""
     db = Database(session)
     execution = await db.get_execution(tenant["id"], execution_id)
     if execution is None:
@@ -440,9 +526,9 @@ async def approve_execution(
 
     amount = Decimal(str(execution["amount"]))
     success, result = await execute_tool(
-        "process_payment",
+        "create_work_order",
         {
-            "invoice_id": execution["invoice_id"],
+            "request_id": execution["request_id"],
             "vendor_id": execution["vendor_id"],
             "amount": float(amount),
         },

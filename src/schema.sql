@@ -1,4 +1,4 @@
--- WorkCore invoice agent schema (PostgreSQL).
+-- WorkCore maintenance agent schema (PostgreSQL).
 -- Local SQLite uses the same tables via init_db() in database.py.
 
 CREATE TABLE IF NOT EXISTS tenants (
@@ -22,23 +22,24 @@ CREATE TABLE IF NOT EXISTS vendors (
     UNIQUE (tenant_id, vendor_id)
 );
 
-CREATE TABLE IF NOT EXISTS departments (
+CREATE TABLE IF NOT EXISTS units (
     id SERIAL PRIMARY KEY,
     tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-    dept_id INTEGER NOT NULL,
+    unit_id INTEGER NOT NULL,
     name VARCHAR(255) NOT NULL,
+    property_name VARCHAR(255),
     budget_annual DECIMAL(12, 2),
     budget_spent DECIMAL(12, 2) DEFAULT 0,
     budget_available DECIMAL(12, 2),
     approval_threshold DECIMAL(12, 2),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, dept_id)
+    UNIQUE (tenant_id, unit_id)
 );
 
 CREATE TABLE IF NOT EXISTS jobs (
     id SERIAL PRIMARY KEY,
     tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-    invoice_id VARCHAR(255) NOT NULL,
+    request_id VARCHAR(255) NOT NULL,
     status VARCHAR(50) DEFAULT 'pending',
     claimed_by INTEGER,
     claimed_at TIMESTAMP,
@@ -47,13 +48,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     available_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, invoice_id)
+    UNIQUE (tenant_id, request_id)
 );
-
-ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0;
-ALTER TABLE jobs ADD COLUMN IF NOT EXISTS last_error TEXT;
-ALTER TABLE jobs ADD COLUMN IF NOT EXISTS available_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
 
 CREATE INDEX IF NOT EXISTS idx_jobs_status_created
     ON jobs (tenant_id, status, created_at);
@@ -63,11 +59,11 @@ CREATE TABLE IF NOT EXISTS executions (
     tenant_id INTEGER NOT NULL REFERENCES tenants(id),
     job_id INTEGER REFERENCES jobs(id),
     idempotency_key VARCHAR(255),
-    invoice_id VARCHAR(255) NOT NULL,
+    request_id VARCHAR(255) NOT NULL,
     vendor_id INTEGER,
-    department_id INTEGER,
+    unit_id INTEGER,
     amount DECIMAL(12, 2),
-    invoice_date DATE,
+    reported_date DATE,
     state VARCHAR(50) NOT NULL DEFAULT 'running',
     decision VARCHAR(50),
     reason TEXT,
@@ -80,30 +76,27 @@ CREATE TABLE IF NOT EXISTS executions (
     UNIQUE (job_id)
 );
 
-ALTER TABLE executions ADD COLUMN IF NOT EXISTS invoice_date DATE;
-ALTER TABLE executions ADD COLUMN IF NOT EXISTS state VARCHAR(50) NOT NULL DEFAULT 'running';
-
 CREATE UNIQUE INDEX IF NOT EXISTS idx_executions_job_unique
     ON executions (job_id)
     WHERE job_id IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS payments (
+CREATE TABLE IF NOT EXISTS work_orders (
     id SERIAL PRIMARY KEY,
     tenant_id INTEGER NOT NULL REFERENCES tenants(id),
     execution_id INTEGER NOT NULL REFERENCES executions(id),
-    invoice_id VARCHAR(255) NOT NULL,
+    request_id VARCHAR(255) NOT NULL,
     vendor_id INTEGER NOT NULL,
     amount DECIMAL(12, 2) NOT NULL CHECK (amount > 0),
     idempotency_key VARCHAR(255) NOT NULL,
     transaction_id VARCHAR(255) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'succeeded',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (tenant_id, invoice_id),
+    UNIQUE (tenant_id, request_id),
     UNIQUE (tenant_id, idempotency_key)
 );
 
-CREATE INDEX IF NOT EXISTS idx_payments_execution
-    ON payments (execution_id);
+CREATE INDEX IF NOT EXISTS idx_work_orders_execution
+    ON work_orders (execution_id);
 
 CREATE TABLE IF NOT EXISTS tool_invocations (
     id SERIAL PRIMARY KEY,

@@ -23,16 +23,16 @@ AUTH = {"Authorization": "Bearer test-key-12345"}
 @pytest.mark.asyncio
 async def test_idempotency_key_prevents_duplicates(client) -> None:
     payload = {
-        "invoice_id": "INV-2024-IDEM-1",
+        "request_id": "INV-2024-IDEM-1",
         "vendor_id": 1,
         "vendor_name": "Acme Corp Supplies",
-        "department_id": 1,
+        "unit_id": 1,
         "amount": 2500.00,
         "date": "2024-09-13",
         "idempotency_key": "abc123",
     }
-    first = await client.post("/process-invoice", headers=AUTH, json=payload)
-    second = await client.post("/process-invoice", headers=AUTH, json=payload)
+    first = await client.post("/process-request", headers=AUTH, json=payload)
+    second = await client.post("/process-request", headers=AUTH, json=payload)
     assert first.status_code == 200
     assert second.status_code == 200
     assert first.json()["execution_id"] == second.json()["execution_id"]
@@ -42,10 +42,10 @@ async def test_idempotency_key_prevents_duplicates(client) -> None:
 @pytest.mark.asyncio
 async def test_concurrent_retries_execute_and_pay_once(client) -> None:
     payload = {
-        "invoice_id": "INV-CONCURRENT-IDEMPOTENCY",
+        "request_id": "INV-CONCURRENT-IDEMPOTENCY",
         "vendor_id": 1,
         "vendor_name": "Acme Corp Supplies",
-        "department_id": 1,
+        "unit_id": 1,
         "amount": 321.45,
         "date": "2024-09-13",
         "idempotency_key": "concurrent-key-001",
@@ -53,7 +53,7 @@ async def test_concurrent_retries_execute_and_pay_once(client) -> None:
 
     responses = await asyncio.gather(
         *[
-            client.post("/process-invoice", headers=AUTH, json=payload)
+            client.post("/process-request", headers=AUTH, json=payload)
             for _ in range(10)
         ]
     )
@@ -66,13 +66,13 @@ async def test_concurrent_retries_execute_and_pay_once(client) -> None:
     execution_id = execution_ids.pop()
     audit = await client.get(f"/executions/{execution_id}", headers=AUTH)
     tool_names = [tool["tool_name"] for tool in audit.json()["tools"]]
-    assert tool_names.count("process_payment") == 1
+    assert tool_names.count("create_work_order") == 1
 
     factory = get_session_factory()
     async with factory() as session:
         db = Database(session)
         tenant = await db.get_tenant_by_api_key("test-key-12345")
-        payments = await db.list_payments(tenant["id"], payload["invoice_id"])
+        payments = await db.list_work_orders(tenant["id"], payload["request_id"])
     assert len(payments) == 1
     assert payments[0]["status"] == "succeeded"
 
@@ -80,21 +80,21 @@ async def test_concurrent_retries_execute_and_pay_once(client) -> None:
 @pytest.mark.asyncio
 async def test_same_invoice_with_different_keys_still_executes_once(client) -> None:
     base = {
-        "invoice_id": "INV-TWO-REQUEST-KEYS",
+        "request_id": "INV-TWO-REQUEST-KEYS",
         "vendor_id": 1,
         "vendor_name": "Acme Corp Supplies",
-        "department_id": 1,
+        "unit_id": 1,
         "amount": 654.32,
         "date": "2024-09-13",
     }
     first, second = await asyncio.gather(
         client.post(
-            "/process-invoice",
+            "/process-request",
             headers=AUTH,
             json={**base, "idempotency_key": "request-key-a"},
         ),
         client.post(
-            "/process-invoice",
+            "/process-request",
             headers=AUTH,
             json={**base, "idempotency_key": "request-key-b"},
         ),
@@ -107,19 +107,19 @@ async def test_same_invoice_with_different_keys_still_executes_once(client) -> N
 @pytest.mark.asyncio
 async def test_reusing_key_for_different_payload_is_conflict(client) -> None:
     base = {
-        "invoice_id": "INV-IDEM-PAYLOAD-A",
+        "request_id": "INV-IDEM-PAYLOAD-A",
         "vendor_id": 1,
         "vendor_name": "Acme Corp Supplies",
-        "department_id": 1,
+        "unit_id": 1,
         "amount": 100.00,
         "date": "2024-09-13",
         "idempotency_key": "payload-bound-key",
     }
-    first = await client.post("/process-invoice", headers=AUTH, json=base)
+    first = await client.post("/process-request", headers=AUTH, json=base)
     second = await client.post(
-        "/process-invoice",
+        "/process-request",
         headers=AUTH,
-        json={**base, "invoice_id": "INV-IDEM-PAYLOAD-B", "amount": 200.00},
+        json={**base, "request_id": "INV-IDEM-PAYLOAD-B", "amount": 200.00},
     )
     assert first.status_code == 200
     assert second.status_code == 409
@@ -155,18 +155,18 @@ async def test_database_unique_constraint_idempotency(seeded_session) -> None:
         tenant_id=tenant["id"],
         job_id=job_id,
         idempotency_key="same-key",
-        invoice_id="INV-UNIQUE-CONSTRAINT",
+        request_id="INV-UNIQUE-CONSTRAINT",
         vendor_id=1,
-        department_id=1,
+        unit_id=1,
         amount=Decimal("100.00"),
     )
     second = await db.create_execution(
         tenant_id=tenant["id"],
         job_id=job_id,
         idempotency_key="same-key",
-        invoice_id="INV-UNIQUE-CONSTRAINT",
+        request_id="INV-UNIQUE-CONSTRAINT",
         vendor_id=1,
-        department_id=1,
+        unit_id=1,
         amount=Decimal("100.00"),
     )
     assert first == second
@@ -176,17 +176,17 @@ async def test_database_unique_constraint_idempotency(seeded_session) -> None:
             text(
                 """
                 INSERT INTO executions (
-                    tenant_id, job_id, idempotency_key, invoice_id,
-                    vendor_id, department_id, amount
+                    tenant_id, job_id, idempotency_key, request_id,
+                    vendor_id, unit_id, amount
                 )
-                VALUES (:tenant_id, :job_id, :key, :invoice_id, 1, 1, 100)
+                VALUES (:tenant_id, :job_id, :key, :request_id, 1, 1, 100)
                 """
             ),
             {
                 "tenant_id": tenant["id"],
                 "job_id": job_id,
                 "key": "same-key",
-                "invoice_id": "INV-UNIQUE-CONSTRAINT-2",
+                "request_id": "INV-UNIQUE-CONSTRAINT-2",
             },
         )
         await seeded_session.commit()

@@ -1,36 +1,32 @@
-# ADR 001: Effectively-once invoice payment
+# ADR 001: Effectively-once PMS work order
 
 Status: accepted
 
 ## Context
 
-An HTTP client can retry, two workers can race, and a payment provider can time out after accepting a charge. No application can atomically commit both its Postgres transaction and an unrelated provider transaction without a distributed protocol.
-
-Calling this “exactly once” without defining the boundary would be misleading.
+A client can retry, two workers can race, and AppFolio/Yardi can time out after accepting a work order. Postgres cannot atomically commit with an external PMS.
 
 ## Decision
 
-We enforce one operation at each boundary:
+One operation at each boundary:
 
-1. `UNIQUE(tenant_id, idempotency_key)` gives one execution per request identity.
-2. `UNIQUE(job_id)` gives one execution per invoice identity, even when request keys differ.
+1. `UNIQUE(tenant_id, idempotency_key)` — one execution per request key.
+2. `UNIQUE(job_id)` — one execution per maintenance request, even with different keys.
 3. The successful execution insert is the ownership token. Non-owners wait; they never run tools.
-4. `UNIQUE(tenant_id, invoice_id)` on `payments` gives one durable payment intent.
-5. `payment:{tenant_id}:{invoice_id}` is the stable provider idempotency key.
-6. A human-review transition uses an atomic conditional update, so only one reviewer can initiate payment.
+4. `UNIQUE(tenant_id, request_id)` on `work_orders` — one durable PMS write intent.
+5. `work-order:{tenant_id}:{request_id}` is the stable key sent to the PMS adapter.
+6. Human review uses an atomic conditional update; a second approver gets `409`.
 
-The production payment adapter must send the stable key to a provider with idempotent request support. Retrying after an ambiguous timeout then returns the original provider transaction.
+The production adapter must send that key to a PMS that honors idempotency.
 
 ## Failure behavior
 
-- Crash before payment reservation: retry can reserve and submit.
-- Crash after reservation but before provider call: retry reuses the reservation and stable key.
-- Timeout after provider accepted payment: retry sends the same key and retrieves the original charge.
-- Concurrent retries: one execution owner; all other callers observe its result.
-- Concurrent human approvals: one `reviewing` transition; other reviewers receive `409`.
+- Crash before reservation: retry can reserve and submit.
+- Crash after reservation, before PMS: retry reuses the same key.
+- Timeout after the PMS accepted: replay the same key, get the original work order.
+- Concurrent retries: one execution owner.
+- Concurrent human approvals: one `reviewing` transition.
 
 ## Consequences
 
-- The database contains a reconstructable payment intent before external I/O.
-- Local tests can prove one execution and one payment row.
-- End-to-end correctness depends on the external provider honoring idempotency. We state that dependency explicitly rather than claiming an impossible cross-system atomic commit.
+Local tests prove one execution and one work-order row. End-to-end correctness still depends on the PMS honoring the key. We do not claim a distributed transaction.

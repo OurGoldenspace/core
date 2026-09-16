@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 
-from src.agent import process_invoice_workflow
+from src.agent import process_request_workflow
 from src.config import settings
 from src.database import Database, get_session_factory, init_db
 
@@ -57,23 +57,19 @@ async def process_claimed_job(job_id: int, worker_id: int) -> str:
                 raise RuntimeError(f"Job {job_id} has no execution payload")
 
             vendor = await db.get_vendor(job["tenant_id"], execution["vendor_id"])
-            department = await db.get_department(job["tenant_id"], execution["department_id"])
+            unit = await db.get_unit(job["tenant_id"], execution["unit_id"])
             vendor_name = vendor["name"] if vendor else f"Vendor {execution['vendor_id']}"
-            department_name = (
-                department["name"]
-                if department
-                else f"Department {execution['department_id']}"
-            )
-            decision, reason, iterations, tokens_used = await process_invoice_workflow(
+            unit_name = unit["name"] if unit else f"Unit {execution['unit_id']}"
+            decision, reason, iterations, tokens_used = await process_request_workflow(
                 db=db,
                 tenant_id=job["tenant_id"],
                 execution_id=execution["id"],
-                invoice_id=execution["invoice_id"],
+                request_id=execution["request_id"],
                 vendor_id=execution["vendor_id"],
-                department_id=execution["department_id"],
+                unit_id=execution["unit_id"],
                 amount=execution["amount"],
-                date=execution["invoice_date"],
-                department_name=department_name,
+                date=execution["reported_date"],
+                unit_name=unit_name,
                 vendor_name=vendor_name,
             )
 
@@ -154,7 +150,7 @@ async def run_forever(worker_id: int, poll_seconds: float = 1.0) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    parser = argparse.ArgumentParser(description="Claim invoice jobs")
+    parser = argparse.ArgumentParser(description="Claim maintenance jobs")
     parser.add_argument("--worker-id", type=int, default=int(os.getenv("WORKER_ID", "1")))
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()

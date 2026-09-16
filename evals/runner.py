@@ -1,15 +1,20 @@
-"""Run one invoice through the real agent loop for promptfoo."""
+"""Run one maintenance request through the real agent loop for promptfoo."""
 
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.agent import process_invoice_workflow
+# Evals stay on the policy stand-in unless you opt into a live model.
+if os.getenv("EVAL_LIVE_LLM") != "1":
+    os.environ["LLM_PROVIDER"] = "policy"
+
+from src.agent import process_request_workflow
 from src.config import get_settings
 from src.database import apply_schema, create_engine
 from src.seed import seed_if_empty
@@ -24,14 +29,9 @@ def _remove(path: Path) -> None:
         path.unlink()
 
 
-async def evaluate_invoice(payload: dict, system_prompt: str | None = None) -> dict:
+async def evaluate_request(payload: dict, system_prompt: str | None = None) -> dict:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    if not (ROOT / "data" / "vendors.json").exists():
-        from data.generate_data import main as generate
-
-        generate()
-
-    db_path = CACHE_DIR / f"{payload['invoice_id']}.db"
+    db_path = CACHE_DIR / f"{payload['request_id']}.db"
     for extra in ("", "-wal", "-shm"):
         _remove(Path(f"{db_path}{extra}"))
 
@@ -52,34 +52,35 @@ async def evaluate_invoice(payload: dict, system_prompt: str | None = None) -> d
                 await ingest_document(
                     db,
                     tenant["id"],
-                    f"eval-context-{payload['invoice_id']}",
+                    f"eval-context-{payload['request_id']}",
                     str(payload["retrieved_document"]),
                     {"source": "adversarial-eval"},
                 )
-            department = await db.get_department(tenant["id"], int(payload["department_id"]))
-            department_name = department["name"] if department else "Unknown"
-            job_id = await db.create_job(tenant["id"], payload["invoice_id"])
+            unit = await db.get_unit(tenant["id"], int(payload["unit_id"]))
+            unit_name = unit["name"] if unit else "Unknown"
+            job_id = await db.create_job(tenant["id"], payload["request_id"])
             execution_id = await db.create_execution(
                 tenant_id=tenant["id"],
                 job_id=job_id,
                 idempotency_key=payload.get("idempotency_key"),
-                invoice_id=payload["invoice_id"],
+                request_id=payload["request_id"],
                 vendor_id=int(payload["vendor_id"]),
-                department_id=int(payload["department_id"]),
+                unit_id=int(payload["unit_id"]),
                 amount=Decimal(str(payload["amount"])),
-                invoice_date=payload["date"],
+                reported_date=payload["date"],
             )
-            decision, reason, iterations, tokens_used = await process_invoice_workflow(
+            decision, reason, iterations, tokens_used = await process_request_workflow(
                 db=db,
                 tenant_id=tenant["id"],
                 execution_id=execution_id,
-                invoice_id=payload["invoice_id"],
+                request_id=payload["request_id"],
                 vendor_id=int(payload["vendor_id"]),
-                department_id=int(payload["department_id"]),
+                unit_id=int(payload["unit_id"]),
                 amount=Decimal(str(payload["amount"])),
                 date=payload["date"],
-                department_name=department_name,
+                unit_name=unit_name,
                 vendor_name=str(payload.get("vendor_name") or ""),
+                message=str(payload.get("message") or ""),
                 **({"system_prompt": system_prompt} if system_prompt else {}),
             )
             await db.update_execution_complete(
@@ -103,6 +104,6 @@ async def evaluate_invoice(payload: dict, system_prompt: str | None = None) -> d
         await engine.dispose()
 
 
-def evaluate_invoice_sync(payload: dict, system_prompt: str | None = None) -> dict:
+def evaluate_request_sync(payload: dict, system_prompt: str | None = None) -> dict:
     with _LOCK:
-        return asyncio.run(evaluate_invoice(payload, system_prompt=system_prompt))
+        return asyncio.run(evaluate_request(payload, system_prompt=system_prompt))

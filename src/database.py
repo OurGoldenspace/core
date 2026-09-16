@@ -57,24 +57,25 @@ SQLITE_STATEMENTS = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS departments (
+    CREATE TABLE IF NOT EXISTS units (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-        dept_id INTEGER NOT NULL,
+        unit_id INTEGER NOT NULL,
         name TEXT NOT NULL,
+        property_name TEXT,
         budget_annual NUMERIC(12, 2),
         budget_spent NUMERIC(12, 2) DEFAULT 0,
         budget_available NUMERIC(12, 2),
         approval_threshold NUMERIC(12, 2),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (tenant_id, dept_id)
+        UNIQUE (tenant_id, unit_id)
     )
     """,
     """
     CREATE TABLE IF NOT EXISTS jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-        invoice_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
         status TEXT DEFAULT 'pending',
         claimed_by INTEGER,
         claimed_at TIMESTAMP,
@@ -83,7 +84,7 @@ SQLITE_STATEMENTS = [
         available_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         completed_at TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (tenant_id, invoice_id)
+        UNIQUE (tenant_id, request_id)
     )
     """,
     """
@@ -92,11 +93,11 @@ SQLITE_STATEMENTS = [
         tenant_id INTEGER NOT NULL REFERENCES tenants(id),
         job_id INTEGER REFERENCES jobs(id),
         idempotency_key TEXT,
-        invoice_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
         vendor_id INTEGER,
-        department_id INTEGER,
+        unit_id INTEGER,
         amount NUMERIC(12, 2),
-        invoice_date DATE,
+        reported_date DATE,
         state TEXT NOT NULL DEFAULT 'running',
         decision TEXT,
         reason TEXT,
@@ -110,18 +111,18 @@ SQLITE_STATEMENTS = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS payments (
+    CREATE TABLE IF NOT EXISTS work_orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id),
         execution_id INTEGER NOT NULL REFERENCES executions(id),
-        invoice_id TEXT NOT NULL,
+        request_id TEXT NOT NULL,
         vendor_id INTEGER NOT NULL,
         amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
         idempotency_key TEXT NOT NULL,
         transaction_id TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'succeeded',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE (tenant_id, invoice_id),
+        UNIQUE (tenant_id, request_id),
         UNIQUE (tenant_id, idempotency_key)
     )
     """,
@@ -170,7 +171,7 @@ SQLITE_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs (tenant_id, status, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_tool_invocations_execution ON tool_invocations (execution_id)",
-    "CREATE INDEX IF NOT EXISTS idx_payments_execution ON payments (execution_id)",
+    "CREATE INDEX IF NOT EXISTS idx_work_orders_execution ON work_orders (execution_id)",
     "CREATE INDEX IF NOT EXISTS idx_document_chunks_source ON document_chunks (tenant_id, source_id)",
 ]
 
@@ -256,7 +257,11 @@ async def _ensure_sqlite_execution_columns(conn) -> None:
     result = await conn.execute(text("PRAGMA table_info(executions)"))
     columns = {row[1] for row in result.fetchall()}
     alterations = {
-        "invoice_date": "ALTER TABLE executions ADD COLUMN invoice_date DATE",
+        "request_id": "ALTER TABLE executions ADD COLUMN request_id VARCHAR(255)",
+        "vendor_id": "ALTER TABLE executions ADD COLUMN vendor_id INTEGER",
+        "unit_id": "ALTER TABLE executions ADD COLUMN unit_id INTEGER",
+        "amount": "ALTER TABLE executions ADD COLUMN amount DECIMAL(12, 2)",
+        "reported_date": "ALTER TABLE executions ADD COLUMN reported_date DATE",
         "state": "ALTER TABLE executions ADD COLUMN state TEXT NOT NULL DEFAULT 'running'",
     }
     for name, statement in alterations.items():
@@ -387,18 +392,18 @@ class Database:
             "ytd_spent": row[5],
         }
 
-    async def get_department(self, tenant_id: int, dept_id: int) -> Optional[dict]:
+    async def get_unit(self, tenant_id: int, unit_id: int) -> Optional[dict]:
         result = await self.session.execute(
             text(
                 """
-                SELECT id, name, budget_annual, budget_spent,
+                SELECT id, name, property_name, budget_annual, budget_spent,
                        COALESCE(budget_available, budget_annual - budget_spent),
                        approval_threshold
-                FROM departments
-                WHERE tenant_id = :tenant_id AND dept_id = :dept_id
+                FROM units
+                WHERE tenant_id = :tenant_id AND unit_id = :unit_id
                 """
             ),
-            {"tenant_id": tenant_id, "dept_id": dept_id},
+            {"tenant_id": tenant_id, "unit_id": unit_id},
         )
         row = result.fetchone()
         if row is None:
@@ -406,13 +411,53 @@ class Database:
         return {
             "id": row[0],
             "name": row[1],
-            "budget_annual": row[2],
-            "budget_spent": row[3],
-            "budget_available": row[4],
-            "approval_threshold": row[5],
+            "property_name": row[2],
+            "budget_annual": row[3],
+            "budget_spent": row[4],
+            "budget_available": row[5],
+            "approval_threshold": row[6],
         }
 
-    async def claim_job(self, tenant_id: int, invoice_id: str, worker_id: int) -> Optional[int]:
+    async def list_units(self, tenant_id: int) -> list[dict]:
+        result = await self.session.execute(
+            text(
+                """
+                SELECT unit_id, name, property_name
+                FROM units
+                WHERE tenant_id = :tenant_id
+                ORDER BY unit_id
+                """
+            ),
+            {"tenant_id": tenant_id},
+        )
+        return [
+            {"unit_id": row[0], "name": row[1], "property_name": row[2]}
+            for row in result.fetchall()
+        ]
+
+    async def list_vendors(self, tenant_id: int) -> list[dict]:
+        result = await self.session.execute(
+            text(
+                """
+                SELECT vendor_id, name, is_approved, risk_level
+                FROM vendors
+                WHERE tenant_id = :tenant_id
+                ORDER BY vendor_id
+                """
+            ),
+            {"tenant_id": tenant_id},
+        )
+        return [
+            {
+                "vendor_id": row[0],
+                "name": row[1],
+                "is_approved": bool(row[2]),
+                "risk_level": row[3],
+            }
+            for row in result.fetchall()
+        ]
+
+    async def claim_job(self, tenant_id: int, request_id: str, worker_id: int) -> Optional[int]:
         if self.dialect == "postgresql":
             result = await self.session.execute(
                 text(
@@ -424,7 +469,7 @@ class Database:
                         WHERE tenant_id = :tenant_id
                           AND status = 'pending'
                           AND COALESCE(available_at, CURRENT_TIMESTAMP) <= CURRENT_TIMESTAMP
-                          AND invoice_id = :invoice_id
+                          AND request_id = :request_id
                         ORDER BY created_at
                         FOR UPDATE SKIP LOCKED
                         LIMIT 1
@@ -432,7 +477,7 @@ class Database:
                     RETURNING id
                     """
                 ),
-                {"tenant_id": tenant_id, "invoice_id": invoice_id, "worker_id": worker_id},
+                {"tenant_id": tenant_id, "request_id": request_id, "worker_id": worker_id},
             )
         else:
             result = await self.session.execute(
@@ -445,14 +490,14 @@ class Database:
                         WHERE tenant_id = :tenant_id
                           AND status = 'pending'
                           AND COALESCE(available_at, CURRENT_TIMESTAMP) <= CURRENT_TIMESTAMP
-                          AND invoice_id = :invoice_id
+                          AND request_id = :request_id
                         ORDER BY created_at
                         LIMIT 1
                     )
                     AND status = 'pending'
                     """
                 ),
-                {"tenant_id": tenant_id, "invoice_id": invoice_id, "worker_id": worker_id},
+                {"tenant_id": tenant_id, "request_id": request_id, "worker_id": worker_id},
             )
             if result.rowcount == 0:
                 await self.session.commit()
@@ -461,12 +506,12 @@ class Database:
                 text(
                     """
                     SELECT id FROM jobs
-                    WHERE tenant_id = :tenant_id AND invoice_id = :invoice_id AND claimed_by = :worker_id
+                    WHERE tenant_id = :tenant_id AND request_id = :request_id AND claimed_by = :worker_id
                     ORDER BY id DESC
                     LIMIT 1
                     """
                 ),
-                {"tenant_id": tenant_id, "invoice_id": invoice_id, "worker_id": worker_id},
+                {"tenant_id": tenant_id, "request_id": request_id, "worker_id": worker_id},
             )
             await self.session.commit()
             row = claimed.fetchone()
@@ -531,17 +576,17 @@ class Database:
         row = claimed.fetchone()
         return row[0] if row else None
 
-    async def create_job(self, tenant_id: int, invoice_id: str) -> int:
+    async def create_job(self, tenant_id: int, request_id: str) -> int:
         result = await self.session.execute(
             text(
                 """
-                INSERT INTO jobs (tenant_id, invoice_id, status, available_at)
-                VALUES (:tenant_id, :invoice_id, 'pending', CURRENT_TIMESTAMP)
-                ON CONFLICT (tenant_id, invoice_id) DO NOTHING
+                INSERT INTO jobs (tenant_id, request_id, status, available_at)
+                VALUES (:tenant_id, :request_id, 'pending', CURRENT_TIMESTAMP)
+                ON CONFLICT (tenant_id, request_id) DO NOTHING
                 RETURNING id
                 """
             ),
-            {"tenant_id": tenant_id, "invoice_id": invoice_id},
+            {"tenant_id": tenant_id, "request_id": request_id},
         )
         await self.session.commit()
         row = result.fetchone()
@@ -550,9 +595,9 @@ class Database:
 
         existing = await self.session.execute(
             text(
-                "SELECT id FROM jobs WHERE tenant_id = :tenant_id AND invoice_id = :invoice_id"
+                "SELECT id FROM jobs WHERE tenant_id = :tenant_id AND request_id = :request_id"
             ),
-            {"tenant_id": tenant_id, "invoice_id": invoice_id},
+            {"tenant_id": tenant_id, "request_id": request_id},
         )
         return existing.scalar_one()
 
@@ -561,11 +606,11 @@ class Database:
         tenant_id: int,
         job_id: int,
         idempotency_key: Optional[str],
-        invoice_id: str,
+        request_id: str,
         vendor_id: int,
-        department_id: int,
+        unit_id: int,
         amount: Decimal,
-        invoice_date: str | None = None,
+        reported_date: str | None = None,
     ) -> tuple[int, bool]:
         """
         Create the single execution for a job.
@@ -577,12 +622,12 @@ class Database:
             text(
                 """
                 INSERT INTO executions (
-                    tenant_id, job_id, idempotency_key, invoice_id,
-                    vendor_id, department_id, amount, invoice_date, state
+                    tenant_id, job_id, idempotency_key, request_id,
+                    vendor_id, unit_id, amount, reported_date, state
                 )
                 VALUES (
-                    :tenant_id, :job_id, :idempotency_key, :invoice_id,
-                    :vendor_id, :department_id, :amount, :invoice_date, 'running'
+                    :tenant_id, :job_id, :idempotency_key, :request_id,
+                    :vendor_id, :unit_id, :amount, :reported_date, 'running'
                 )
                 ON CONFLICT DO NOTHING
                 RETURNING id
@@ -592,11 +637,11 @@ class Database:
                 "tenant_id": tenant_id,
                 "job_id": job_id,
                 "idempotency_key": idempotency_key,
-                "invoice_id": invoice_id,
+                "request_id": request_id,
                 "vendor_id": vendor_id,
-                "department_id": department_id,
+                "unit_id": unit_id,
                 "amount": float(amount),
-                "invoice_date": invoice_date,
+                "reported_date": reported_date,
             },
         )
         await self.session.commit()
@@ -630,21 +675,21 @@ class Database:
         tenant_id: int,
         job_id: int,
         idempotency_key: Optional[str],
-        invoice_id: str,
+        request_id: str,
         vendor_id: int,
-        department_id: int,
+        unit_id: int,
         amount: Decimal,
-        invoice_date: str | None = None,
+        reported_date: str | None = None,
     ) -> int:
         execution_id, _ = await self.acquire_execution(
             tenant_id=tenant_id,
             job_id=job_id,
             idempotency_key=idempotency_key,
-            invoice_id=invoice_id,
+            request_id=request_id,
             vendor_id=vendor_id,
-            department_id=department_id,
+            unit_id=unit_id,
             amount=amount,
-            invoice_date=invoice_date,
+            reported_date=reported_date,
         )
         return execution_id
 
@@ -657,7 +702,7 @@ class Database:
             text(
                 """
                 SELECT id, decision, reason, iterations, tokens_used, duration_ms,
-                       invoice_id, vendor_id, department_id, amount, invoice_date, state
+                       request_id, vendor_id, unit_id, amount, reported_date, state
                 FROM executions
                 WHERE tenant_id = :tenant_id AND idempotency_key = :key
                 """
@@ -674,11 +719,11 @@ class Database:
             "iterations": row[3],
             "tokens_used": row[4],
             "duration_ms": row[5],
-            "invoice_id": row[6],
+            "request_id": row[6],
             "vendor_id": row[7],
-            "department_id": row[8],
+            "unit_id": row[8],
             "amount": row[9],
-            "invoice_date": str(row[10]) if row[10] is not None else None,
+            "reported_date": str(row[10]) if row[10] is not None else None,
             "state": row[11],
         }
 
@@ -686,8 +731,8 @@ class Database:
         result = await self.session.execute(
             text(
                 """
-                SELECT id, invoice_id, vendor_id, department_id, amount,
-                       invoice_date, state, decision, reason, iterations,
+                SELECT id, request_id, vendor_id, unit_id, amount,
+                       reported_date, state, decision, reason, iterations,
                        tokens_used, duration_ms, job_id
                 FROM executions
                 WHERE tenant_id = :tenant_id AND id = :execution_id
@@ -700,11 +745,11 @@ class Database:
             return None
         return {
             "id": row[0],
-            "invoice_id": row[1],
+            "request_id": row[1],
             "vendor_id": row[2],
-            "department_id": row[3],
+            "unit_id": row[3],
             "amount": row[4],
-            "invoice_date": str(row[5]) if row[5] is not None else None,
+            "reported_date": str(row[5]) if row[5] is not None else None,
             "state": row[6],
             "decision": row[7],
             "reason": row[8],
@@ -856,61 +901,61 @@ class Database:
         )
         await self.session.flush()
 
-    async def find_duplicate_invoices(
+    async def find_open_work_orders(
         self,
         tenant_id: int,
-        vendor_id: int,
+        unit_id: int,
         amount: Decimal,
         date: str,
     ) -> list[str]:
         result = await self.session.execute(
             text(
                 """
-                SELECT invoice_id FROM executions
+                SELECT request_id FROM executions
                 WHERE tenant_id = :tenant_id
-                  AND vendor_id = :vendor_id
+                  AND unit_id = :unit_id
                   AND amount = :amount
-                  AND invoice_date = :date
+                  AND reported_date = :date
                   AND decision IN ('approved', 'needs_review')
                 LIMIT 5
                 """
             ),
             {
                 "tenant_id": tenant_id,
-                "vendor_id": vendor_id,
+                "unit_id": unit_id,
                 "amount": float(amount),
                 "date": date,
             },
         )
         return [row[0] for row in result.fetchall()]
 
-    async def reserve_payment(
+    async def reserve_work_order(
         self,
         tenant_id: int,
         execution_id: int,
-        invoice_id: str,
+        request_id: str,
         vendor_id: int,
         amount: Decimal,
     ) -> tuple[dict, bool]:
         """
-        Persist a payment intent before contacting a provider.
+        Persist a work-order intent before contacting the PMS.
 
-        The invoice-scoped key is also sent to the external provider. A retry
-        can safely replay that key and receives the original transaction.
+        The request-scoped key is also sent to the PMS adapter. A retry
+        can safely replay that key and receives the original work order.
         """
         import uuid
 
-        idempotency_key = f"payment:{tenant_id}:{invoice_id}"
+        idempotency_key = f"work-order:{tenant_id}:{request_id}"
         transaction_id = f"TXN-{uuid.uuid4().hex[:12].upper()}"
         result = await self.session.execute(
             text(
                 """
-                INSERT INTO payments (
-                    tenant_id, execution_id, invoice_id, vendor_id, amount,
+                INSERT INTO work_orders (
+                    tenant_id, execution_id, request_id, vendor_id, amount,
                     idempotency_key, transaction_id, status
                 )
                 VALUES (
-                    :tenant_id, :execution_id, :invoice_id, :vendor_id, :amount,
+                    :tenant_id, :execution_id, :request_id, :vendor_id, :amount,
                     :idempotency_key, :transaction_id, 'pending'
                 )
                 ON CONFLICT DO NOTHING
@@ -920,7 +965,7 @@ class Database:
             {
                 "tenant_id": tenant_id,
                 "execution_id": execution_id,
-                "invoice_id": invoice_id,
+                "request_id": request_id,
                 "vendor_id": vendor_id,
                 "amount": float(amount),
                 "idempotency_key": idempotency_key,
@@ -935,11 +980,11 @@ class Database:
                 text(
                     """
                     SELECT id, transaction_id, idempotency_key, status
-                    FROM payments
-                    WHERE tenant_id = :tenant_id AND invoice_id = :invoice_id
+                    FROM work_orders
+                    WHERE tenant_id = :tenant_id AND request_id = :request_id
                     """
                 ),
-                {"tenant_id": tenant_id, "invoice_id": invoice_id},
+                {"tenant_id": tenant_id, "request_id": request_id},
             )
             row = existing.one()
         return {
@@ -949,37 +994,37 @@ class Database:
             "status": row[3],
         }, is_owner
 
-    async def complete_payment(self, payment_id: int) -> None:
+    async def complete_work_order(self, work_order_id: int) -> None:
         await self.session.execute(
             text(
                 """
-                UPDATE payments
+                UPDATE work_orders
                 SET status = 'succeeded'
-                WHERE id = :payment_id AND status = 'pending'
+                WHERE id = :work_order_id AND status = 'pending'
                 """
             ),
-            {"payment_id": payment_id},
+            {"work_order_id": work_order_id},
         )
         await self.session.commit()
 
-    async def list_payments(self, tenant_id: int, invoice_id: str) -> list[dict]:
+    async def list_work_orders(self, tenant_id: int, request_id: str) -> list[dict]:
         result = await self.session.execute(
             text(
                 """
-                SELECT id, execution_id, invoice_id, transaction_id,
+                SELECT id, execution_id, request_id, transaction_id,
                        idempotency_key, status, amount
-                FROM payments
-                WHERE tenant_id = :tenant_id AND invoice_id = :invoice_id
+                FROM work_orders
+                WHERE tenant_id = :tenant_id AND request_id = :request_id
                 ORDER BY id
                 """
             ),
-            {"tenant_id": tenant_id, "invoice_id": invoice_id},
+            {"tenant_id": tenant_id, "request_id": request_id},
         )
         return [
             {
                 "id": row[0],
                 "execution_id": row[1],
-                "invoice_id": row[2],
+                "request_id": row[2],
                 "transaction_id": row[3],
                 "idempotency_key": row[4],
                 "status": row[5],
@@ -1090,7 +1135,7 @@ class Database:
         result = await self.session.execute(
             text(
                 """
-                SELECT id, tenant_id, invoice_id, status, claimed_by,
+                SELECT id, tenant_id, request_id, status, claimed_by,
                        retry_count, last_error, available_at
                 FROM jobs
                 WHERE id = :job_id
@@ -1104,7 +1149,7 @@ class Database:
         return {
             "id": row[0],
             "tenant_id": row[1],
-            "invoice_id": row[2],
+            "request_id": row[2],
             "status": row[3],
             "claimed_by": row[4],
             "retry_count": row[5],

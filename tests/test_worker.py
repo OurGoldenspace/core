@@ -12,15 +12,15 @@ AUTH = {"Authorization": "Bearer test-key-12345"}
 
 async def test_enqueued_invoice_is_processed_by_worker(client) -> None:
     payload = {
-        "invoice_id": "INV-WORKER-APPROVE",
+        "request_id": "INV-WORKER-APPROVE",
         "vendor_id": 1,
         "vendor_name": "Acme Corp Supplies",
-        "department_id": 1,
+        "unit_id": 1,
         "amount": 777.00,
         "date": "2024-05-01",
         "idempotency_key": "worker-request-001",
     }
-    queued = await client.post("/invoice-jobs", headers=AUTH, json=payload)
+    queued = await client.post("/request-jobs", headers=AUTH, json=payload)
     assert queued.status_code == 202
     assert queued.json()["status"] == "pending"
 
@@ -28,7 +28,7 @@ async def test_enqueued_invoice_is_processed_by_worker(client) -> None:
     assert claimed_job_id == queued.json()["job_id"]
 
     completed = await client.get(
-        f"/invoice-jobs/{claimed_job_id}",
+        f"/request-jobs/{claimed_job_id}",
         headers=AUTH,
     )
     assert completed.status_code == 200
@@ -40,25 +40,25 @@ async def test_enqueued_invoice_is_processed_by_worker(client) -> None:
         headers=AUTH,
     )
     tool_names = [tool["tool_name"] for tool in audit.json()["tools"]]
-    assert "process_payment" in tool_names
+    assert "create_work_order" in tool_names
 
 
 async def test_enqueued_high_amount_waits_for_human(client) -> None:
     queued = await client.post(
-        "/invoice-jobs",
+        "/request-jobs",
         headers=AUTH,
         json={
-            "invoice_id": "INV-WORKER-REVIEW",
+            "request_id": "INV-WORKER-REVIEW",
             "vendor_id": 1,
             "vendor_name": "Acme Corp Supplies",
-            "department_id": 1,
+            "unit_id": 1,
             "amount": 7500.00,
             "date": "2024-05-02",
         },
     )
     await run_once(worker_id=43)
     pending = await client.get(
-        f"/invoice-jobs/{queued.json()['job_id']}",
+        f"/request-jobs/{queued.json()['job_id']}",
         headers=AUTH,
     )
     assert pending.json()["status"] == "awaiting_review"

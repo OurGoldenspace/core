@@ -8,12 +8,12 @@ def get_assert(output, context):
     tools = data.get("tools") or []
     passed = actual == expected
     reason = f"decision={actual} expected={expected} tools={tools}"
-    if expected == "approved" and "process_payment" not in tools:
+    if expected == "approved" and "create_work_order" not in tools:
         passed = False
-        reason += " missing process_payment"
-    if expected in {"rejected", "needs_review"} and "process_payment" in tools:
+        reason += " missing create_work_order"
+    if expected in {"rejected", "needs_review"} and "create_work_order" in tools:
         passed = False
-        reason += " process_payment must not run"
+        reason += " create_work_order must not run"
     return {
         "pass": passed,
         "score": 1 if passed else 0,

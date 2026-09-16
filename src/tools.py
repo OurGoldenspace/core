@@ -1,305 +1,184 @@
 """
-Tool Functions for Invoice Processing
+Maintenance tools.
 
-Tools available to the agent:
-1. validate_vendor() - Check if vendor is approved and low risk
-2. check_budget() - Verify department has available budget
-3. detect_duplicates() - Find duplicate invoices (same vendor, amount, date)
-4. process_payment() - Execute payment for approved invoices
-
-Each tool is called by the agent based on LLM reasoning.
-Inputs are validated with Pydantic before execution.
-Outputs are logged for audit trail.
+1. validate_vendor - contractor is approved and not high-risk
+2. lookup_unit - unit exists in the PMS and owner cap covers the estimate
+3. detect_open_work_orders - same unit, estimate, and date already in flight
+4. create_work_order - one PMS write, replay-safe
 """
 
-import logging
+from __future__ import annotations
+
 import asyncio
-from typing import Dict, Any
+import logging
 from decimal import Decimal
+from typing import Any
 
 from pydantic import ValidationError
 
-from src.models import (
-    CheckBudgetOutput,
-    CheckBudgetInput,
-    DetectDuplicatesOutput,
-    DetectDuplicatesInput,
-    ProcessPaymentInput,
-    ProcessPaymentOutput,
-    ValidateVendorOutput,
-    ValidateVendorInput,
-)
 from src.database import Database
+from src.models import (
+    CreateWorkOrderInput,
+    CreateWorkOrderOutput,
+    DetectOpenWorkOrdersInput,
+    DetectOpenWorkOrdersOutput,
+    LookupUnitInput,
+    LookupUnitOutput,
+    ValidateVendorInput,
+    ValidateVendorOutput,
+)
+from src.pms import PropertyManagementClient
 
 logger = logging.getLogger(__name__)
 
 
-# =========================================================================
-# TOOL 1: VALIDATE VENDOR
-# =========================================================================
-
 async def validate_vendor(
     db: Database,
     tenant_id: int,
-    vendor_id: int
-) -> Dict[str, Any]:
-    """
-    Validate vendor: Is it approved? What's the risk level?
-    
-    Returns:
-    {
-        "is_approved": bool,
-        "risk_level": str,
-        "reason": str
-    }
-    """
+    vendor_id: int,
+) -> dict[str, Any]:
     vendor = await db.get_vendor(tenant_id, vendor_id)
-    
+    await asyncio.sleep(0.05)
     if not vendor:
         return {
             "is_approved": False,
             "risk_level": "unknown",
-            "reason": f"Vendor {vendor_id} not found in system"
+            "reason": f"Vendor {vendor_id} not found in the PMS",
         }
-    
-    # Simulate slight processing time (tools should be realistic)
-    await asyncio.sleep(0.05)
-    
     if not vendor["is_approved"]:
         return {
             "is_approved": False,
             "risk_level": vendor["risk_level"],
-            "reason": f"Vendor {vendor['name']} is not approved"
+            "reason": f"Vendor {vendor['name']} is not an approved contractor",
         }
-    
     if vendor["risk_level"] == "high":
         return {
             "is_approved": False,
             "risk_level": vendor["risk_level"],
-            "reason": f"Vendor {vendor['name']} is high-risk"
+            "reason": f"Vendor {vendor['name']} is high-risk",
         }
-    
     return {
         "is_approved": True,
         "risk_level": vendor["risk_level"],
-        "reason": f"Vendor {vendor['name']} is approved and {vendor['risk_level']}-risk"
+        "reason": f"Vendor {vendor['name']} is approved and {vendor['risk_level']}-risk",
     }
 
 
-# =========================================================================
-# TOOL 2: CHECK BUDGET
-# =========================================================================
-
-async def check_budget(
+async def lookup_unit(
     db: Database,
     tenant_id: int,
-    department_id: int,
-    amount: Decimal
-) -> Dict[str, Any]:
-    """
-    Check budget: Does department have enough available budget?
-    
-    Returns:
-    {
-        "has_budget": bool,
-        "available": Decimal,
-        "required": Decimal,
-        "reason": str
-    }
-    """
-    department = await db.get_department(tenant_id, department_id)
-    
-    if not department:
-        return {
-            "has_budget": False,
-            "available": Decimal("0"),
-            "required": amount,
-            "reason": f"Department {department_id} not found"
-        }
-    
-    # Simulate processing time
-    await asyncio.sleep(0.05)
-    
-    available = department["budget_available"]
-    
-    if available >= amount:
-        return {
-            "has_budget": True,
-            "available": available,
-            "required": amount,
-            "reason": f"Department {department['name']} has sufficient budget. Available: ${available}"
-        }
-    else:
-        return {
-            "has_budget": False,
-            "available": available,
-            "required": amount,
-            "reason": f"Department {department['name']} insufficient budget. Available: ${available}, Required: ${amount}"
-        }
-
-
-# =========================================================================
-# TOOL 3: DETECT DUPLICATES
-# =========================================================================
-
-async def detect_duplicates(
-    db: Database,
-    tenant_id: int,
-    vendor_id: int,
+    unit_id: int,
     amount: Decimal,
-    date: str
-) -> Dict[str, Any]:
-    """
-    Detect duplicates: Are there other invoices with same vendor, amount, date?
-    
-    Returns:
-    {
-        "is_duplicate": bool,
-        "matching_invoices": [list of invoice IDs],
-        "reason": str
-    }
-    """
-    # Simulate processing time
+) -> dict[str, Any]:
+    return await PropertyManagementClient(db).lookup_unit(tenant_id, unit_id, amount)
+
+
+async def detect_open_work_orders(
+    db: Database,
+    tenant_id: int,
+    unit_id: int,
+    amount: Decimal,
+    date: str,
+) -> dict[str, Any]:
     await asyncio.sleep(0.05)
-    
-    matching_invoices = await db.find_duplicate_invoices(
-        tenant_id, vendor_id, amount, date
-    )
-    
-    if matching_invoices:
+    matching = await db.find_open_work_orders(tenant_id, unit_id, amount, date)
+    if matching:
         return {
             "is_duplicate": True,
-            "matching_invoices": matching_invoices,
-            "reason": f"Found {len(matching_invoices)} invoice(s) with same vendor, amount, and date"
+            "matching_requests": matching,
+            "reason": f"Found {len(matching)} duplicate open request(s) for the same unit, estimate, and date",
         }
-    else:
-        return {
-            "is_duplicate": False,
-            "matching_invoices": [],
-            "reason": "No duplicate invoices found"
-        }
+    return {
+        "is_duplicate": False,
+        "matching_requests": [],
+        "reason": "No open work order for this unit, estimate, and date",
+    }
 
 
-# =========================================================================
-# TOOL 4: PROCESS PAYMENT
-# =========================================================================
-
-async def process_payment(
+async def create_work_order(
     db: Database,
     tenant_id: int,
     execution_id: int,
-    invoice_id: str,
+    request_id: str,
     vendor_id: int,
-    amount: Decimal
-) -> Dict[str, Any]:
-    """
-    Process payment: Mark invoice as approved and generate transaction.
-    
-    Returns:
-    {
-        "success": bool,
-        "transaction_id": Optional[str],
-        "reason": str
-    }
-    """
-    payment, is_owner = await db.reserve_payment(
+    amount: Decimal,
+) -> dict[str, Any]:
+    result = await PropertyManagementClient(db).create_work_order(
         tenant_id=tenant_id,
         execution_id=execution_id,
-        invoice_id=invoice_id,
+        request_id=request_id,
         vendor_id=vendor_id,
-        amount=amount,
+        estimated_cost=amount,
     )
+    logger.info("Created work order: %s -> %s", request_id, result["transaction_id"])
+    return result
 
-    # A real provider receives payment["idempotency_key"]. Replaying that key
-    # after a timeout returns the same provider-side transaction.
-    await asyncio.sleep(0.1)
-    await db.complete_payment(payment["id"])
-    transaction_id = payment["transaction_id"]
-
-    logger.info("Processed payment: %s -> %s", invoice_id, transaction_id)
-    
-    return {
-        "success": True,
-        "transaction_id": transaction_id,
-        "idempotency_key": payment["idempotency_key"],
-        "was_replayed": not is_owner,
-        "reason": f"Successfully processed payment of ${amount} for invoice {invoice_id}",
-    }
-
-
-# =========================================================================
-# TOOL REGISTRY
-# =========================================================================
 
 AVAILABLE_TOOLS = {
     "validate_vendor": {
-        "description": "Validate if a vendor is approved and check risk level",
+        "description": "Validate if a contractor is approved and check risk level",
         "handler": validate_vendor,
         "parameters": {
             "vendor_id": {
                 "type": "integer",
-                "description": "ID of the vendor to validate"
+                "description": "PMS vendor id of the contractor",
             }
-        }
+        },
     },
-    "check_budget": {
-        "description": "Check if department has available budget for an invoice amount",
-        "handler": check_budget,
+    "lookup_unit": {
+        "description": "Look up the unit in the PMS and check the owner spend cap",
+        "handler": lookup_unit,
         "parameters": {
-            "department_id": {
+            "unit_id": {
                 "type": "integer",
-                "description": "ID of the department"
+                "description": "PMS unit id",
             },
             "amount": {
                 "type": "number",
-                "description": "Invoice amount to check"
-            }
-        }
+                "description": "Estimated repair cost",
+            },
+        },
     },
-    "detect_duplicates": {
-        "description": "Detect if invoice is a duplicate (same vendor, amount, date)",
-        "handler": detect_duplicates,
+    "detect_open_work_orders": {
+        "description": "Detect an open work order for the same unit, estimate, and date",
+        "handler": detect_open_work_orders,
         "parameters": {
-            "vendor_id": {
+            "unit_id": {
                 "type": "integer",
-                "description": "ID of the vendor"
+                "description": "PMS unit id",
             },
             "amount": {
                 "type": "number",
-                "description": "Invoice amount"
+                "description": "Estimated repair cost",
             },
             "date": {
                 "type": "string",
-                "description": "Invoice date in YYYY-MM-DD format"
-            }
-        }
+                "description": "Reported date in YYYY-MM-DD format",
+            },
+        },
     },
-    "process_payment": {
-        "description": "Process payment for an approved invoice",
-        "handler": process_payment,
+    "create_work_order": {
+        "description": "Create a work order in the PMS for an approved request",
+        "handler": create_work_order,
         "parameters": {
-            "invoice_id": {
+            "request_id": {
                 "type": "string",
-                "description": "ID of the invoice"
+                "description": "Maintenance request id",
             },
             "vendor_id": {
                 "type": "integer",
-                "description": "ID of the vendor"
+                "description": "PMS vendor id of the contractor",
             },
             "amount": {
                 "type": "number",
-                "description": "Invoice amount"
-            }
-        }
-    }
+                "description": "Estimated repair cost",
+            },
+        },
+    },
 }
 
 
 def get_tool_definitions_for_llm() -> list[dict]:
-    """
-    Get tool definitions formatted for LLM.
-    This is what we send to Claude so it knows what tools are available.
-    """
     return [
         {
             "name": name,
@@ -309,12 +188,12 @@ def get_tool_definitions_for_llm() -> list[dict]:
                 "properties": {
                     param_name: {
                         "type": param["type"],
-                        "description": param["description"]
+                        "description": param["description"],
                     }
                     for param_name, param in tool["parameters"].items()
                 },
-                "required": list(tool["parameters"].keys())
-            }
+                "required": list(tool["parameters"].keys()),
+            },
         }
         for name, tool in AVAILABLE_TOOLS.items()
     ]
@@ -322,21 +201,11 @@ def get_tool_definitions_for_llm() -> list[dict]:
 
 async def execute_tool(
     tool_name: str,
-    tool_input: Dict[str, Any],
+    tool_input: dict[str, Any],
     db: Database,
     tenant_id: int,
     execution_id: int | None = None,
 ) -> tuple[bool, Any]:
-    """
-    Execute a tool with given input.
-    
-    Returns:
-    (success: bool, result: dict)
-    
-    success=False means validation error (didn't execute)
-    success=True means tool executed (even if business logic rejected)
-    """
-    
     if tool_name not in AVAILABLE_TOOLS:
         return False, {"error": f"Tool {tool_name} not found"}
 
@@ -348,36 +217,36 @@ async def execute_tool(
             payload = ValidateVendorInput.model_validate(tool_input)
             result = await handler(db, tenant_id, payload.vendor_id)
             result = ValidateVendorOutput.model_validate(result).model_dump(mode="json")
-        elif tool_name == "check_budget":
-            payload = CheckBudgetInput.model_validate(tool_input)
-            result = await handler(db, tenant_id, payload.department_id, payload.amount)
-            result = CheckBudgetOutput.model_validate(result).model_dump(mode="json")
-        elif tool_name == "detect_duplicates":
-            payload = DetectDuplicatesInput.model_validate(tool_input)
+        elif tool_name == "lookup_unit":
+            payload = LookupUnitInput.model_validate(tool_input)
+            result = await handler(db, tenant_id, payload.unit_id, payload.amount)
+            result = LookupUnitOutput.model_validate(result).model_dump(mode="json")
+        elif tool_name == "detect_open_work_orders":
+            payload = DetectOpenWorkOrdersInput.model_validate(tool_input)
             result = await handler(
-                db, tenant_id, payload.vendor_id, payload.amount, payload.date
+                db, tenant_id, payload.unit_id, payload.amount, payload.date
             )
-            result = DetectDuplicatesOutput.model_validate(result).model_dump(mode="json")
-        elif tool_name == "process_payment":
+            result = DetectOpenWorkOrdersOutput.model_validate(result).model_dump(mode="json")
+        elif tool_name == "create_work_order":
             if execution_id is None:
                 return False, {"error": "execution_context_required"}
-            payload = ProcessPaymentInput.model_validate(tool_input)
+            payload = CreateWorkOrderInput.model_validate(tool_input)
             result = await handler(
                 db,
                 tenant_id,
                 execution_id,
-                payload.invoice_id,
+                payload.request_id,
                 payload.vendor_id,
                 payload.amount,
             )
-            result = ProcessPaymentOutput.model_validate(result).model_dump(mode="json")
+            result = CreateWorkOrderOutput.model_validate(result).model_dump(mode="json")
         else:
             return False, {"error": f"Unknown tool: {tool_name}"}
 
         return True, result
     except ValidationError as error:
-        logger.warning(f"Tool validation failed: {tool_name}: {error}")
+        logger.warning("Tool validation failed: %s: %s", tool_name, error)
         return False, {"error": "validation_failed", "details": error.errors()}
-    except Exception as e:
-        logger.error(f"Tool execution error: {tool_name}: {str(e)}")
-        return False, {"error": str(e)}
+    except Exception as error:
+        logger.error("Tool execution error: %s: %s", tool_name, error)
+        return False, {"error": str(error)}

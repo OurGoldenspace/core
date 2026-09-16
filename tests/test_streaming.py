@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from types import SimpleNamespace
 
-from src.agent import InvoiceAgent
+from src.agent import MaintenanceAgent
 
 
 class FakeMessageStream:
@@ -39,16 +39,17 @@ class FakeClient:
 
 async def test_anthropic_text_deltas_reach_event_callback() -> None:
     events = []
-    agent = InvoiceAgent(db=None, tenant_id=1, on_event=events.append)
+    agent = MaintenanceAgent(db=None, tenant_id=1, on_event=events.append)
     agent._use_policy = False
+    agent.provider = "anthropic"
     agent.client = FakeClient()
 
     response = await agent._complete(
         messages=[{"role": "user", "content": "process"}],
         last_results=None,
-        invoice_id="INV-STREAM",
+        request_id="INV-STREAM",
         vendor_id=1,
-        department_id=1,
+        unit_id=1,
         amount=Decimal("100"),
         date="2024-09-13",
     )

@@ -1,1 +1,1 @@
-"""WorkCore invoice agent."""
+"""WorkCore maintenance agent."""

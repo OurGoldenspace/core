@@ -23,7 +23,7 @@ async def complete_groq(
     on_delta: Callable[[str], Awaitable[None]] | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> SimpleNamespace:
-    """Call Groq and return the provider-neutral shape consumed by InvoiceAgent."""
+    """Call Groq and return the provider-neutral shape consumed by MaintenanceAgent."""
     request = {
         "model": model,
         "max_tokens": max_tokens,
@@ -43,7 +43,7 @@ async def complete_groq(
             on_delta=on_delta,
         )
 
-    # InvoiceAgent owns the end-to-end timeout so streaming is not cut off by
+    # MaintenanceAgent owns the end-to-end timeout so streaming is not cut off by
     # httpx's shorter default read timeout.
     async with httpx.AsyncClient(timeout=None) as owned_client:
         return await _complete_with_client(
@@ -260,3 +260,37 @@ def _groq_assistant_message(content: list[Any]) -> dict[str, Any]:
     if tool_calls:
         message["tool_calls"] = tool_calls
     return message
+
+
+async def complete_groq_chat(
+    *,
+    api_key: str,
+    model: str,
+    max_tokens: int,
+    messages: list[dict[str, Any]],
+    timeout_seconds: float = 30,
+    client: httpx.AsyncClient | None = None,
+) -> str:
+    """Plain chat completion for intake. Supports text and image_url parts."""
+    request = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": 0.2,
+        "messages": messages,
+    }
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    async def _post(http_client: httpx.AsyncClient) -> str:
+        response = await http_client.post(
+            GROQ_CHAT_COMPLETIONS_URL,
+            headers=headers,
+            json=request,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        return str(payload["choices"][0]["message"].get("content") or "")
+
+    if client is not None:
+        return await _post(client)
+    async with httpx.AsyncClient(timeout=timeout_seconds) as owned_client:
+        return await _post(owned_client)

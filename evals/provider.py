@@ -19,17 +19,18 @@ os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{ROOT / 'evals' / '.
 
 
 def call_api(prompt, options, context):
-    from evals.runner import evaluate_invoice_sync
+    from evals.runner import evaluate_request_sync
 
     variables = context.get("vars") or {}
-    result = evaluate_invoice_sync(
+    result = evaluate_request_sync(
         {
-            "invoice_id": variables.get("invoice_id", "INV-EVAL"),
+            "request_id": variables.get("request_id", "INV-EVAL"),
             "vendor_id": variables.get("vendor_id", 1),
             "vendor_name": variables.get("vendor_name", "Acme Corp Supplies"),
-            "department_id": variables.get("department_id", 1),
+            "unit_id": variables.get("unit_id", 1),
             "amount": variables.get("amount", 2500),
             "date": variables.get("date", "2024-09-13"),
+            "message": variables.get("message", ""),
             "retrieved_document": variables.get("retrieved_document"),
         },
         system_prompt=prompt,

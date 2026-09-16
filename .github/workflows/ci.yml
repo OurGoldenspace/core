@@ -31,9 +31,6 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Generate fixture data
-        run: python data/generate_data.py
-
       - name: Migrate and seed PostgreSQL
         env:
           PGPASSWORD: postgres

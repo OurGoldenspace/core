@@ -13,10 +13,10 @@ depends_on = None
 
 TENANT_TABLES = (
     "vendors",
-    "departments",
+    "units",
     "jobs",
     "executions",
-    "payments",
+    "work_orders",
     "tool_invocations",
     "llm_calls",
 )
@@ -48,7 +48,7 @@ def upgrade() -> None:
                 GRANT USAGE ON SCHEMA public TO workcore_app;
                 GRANT SELECT ON tenants TO workcore_app;
                 GRANT SELECT, INSERT, UPDATE ON
-                    vendors, departments, jobs, executions, payments,
+                    vendors, units, jobs, executions, work_orders,
                     tool_invocations, llm_calls
                 TO workcore_app;
                 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO workcore_app;
@@ -58,7 +58,7 @@ def upgrade() -> None:
                 GRANT USAGE ON SCHEMA public TO workcore_worker;
                 GRANT SELECT ON tenants TO workcore_worker;
                 GRANT SELECT, INSERT, UPDATE ON
-                    vendors, departments, jobs, executions, payments,
+                    vendors, units, jobs, executions, work_orders,
                     tool_invocations, llm_calls
                 TO workcore_worker;
                 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO workcore_worker;

@@ -7,7 +7,7 @@ import json
 import httpx
 
 from src.config import get_settings
-from src.groq_provider import GROQ_CHAT_COMPLETIONS_URL, complete_groq
+from src.groq_provider import GROQ_CHAT_COMPLETIONS_URL, complete_groq, complete_groq_chat
 
 
 def test_groq_is_preferred_when_key_is_configured(monkeypatch) -> None:
@@ -125,6 +125,37 @@ async def test_groq_stream_emits_text_deltas() -> None:
     assert deltas == ['{"decision":"', 'approved","reason":"ok"}']
     assert response.usage.input_tokens == 13
     assert response.usage.output_tokens == 6
+
+
+async def test_groq_chat_returns_text_content() -> None:
+    async def handle(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert "tools" not in payload
+        assert payload["messages"][0]["role"] == "system"
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"content": '{"reply":"Which unit?","ready":false}'},
+                    }
+                ]
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        text = await complete_groq_chat(
+            api_key="test-groq-key",
+            model="qwen/qwen3.6-27b",
+            max_tokens=200,
+            messages=[
+                {"role": "system", "content": "Return JSON"},
+                {"role": "user", "content": "Heat is out"},
+            ],
+            client=client,
+        )
+    assert "Which unit" in text
 
 
 def tool_definition() -> dict:

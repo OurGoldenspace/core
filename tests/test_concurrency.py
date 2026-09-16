@@ -27,8 +27,8 @@ async def test_parallel_tool_execution():
     
     Simulates:
     - validate_vendor: 234ms
-    - check_budget: 156ms
-    - detect_duplicates: 89ms
+    - lookup_unit: 156ms
+    - detect_open_work_orders: 89ms
     
     Parallel should take ~234ms (max), not ~479ms (sum).
     """
@@ -39,12 +39,12 @@ async def test_parallel_tool_execution():
         return "approved"
     
     async def tool_2():
-        """Simulate check_budget (156ms)."""
+        """Simulate lookup_unit (156ms)."""
         await asyncio.sleep(0.156)
         return "has_budget"
     
     async def tool_3():
-        """Simulate detect_duplicates (89ms)."""
+        """Simulate detect_open_work_orders (89ms)."""
         await asyncio.sleep(0.089)
         return "not_duplicate"
     
@@ -81,10 +81,10 @@ async def test_10_concurrent_invoices():
     as 1 invoice.
     """
     
-    async def process_invoice(invoice_id):
+    async def process_invoice(request_id):
         """Simulate invoice processing (tool validation time)."""
         await asyncio.sleep(0.234)  # Single tool
-        return f"processed-{invoice_id}"
+        return f"processed-{request_id}"
     
     # Sequential: 10 × 234ms = 2340ms
     start = time.time()
@@ -115,13 +115,13 @@ async def test_five_real_http_clients_process_in_parallel(client):
 
     async def submit(index: int):
         return await client.post(
-            "/process-invoice",
+            "/process-request",
             headers=AUTH,
             json={
-                "invoice_id": f"INV-PAR-{index:02d}",
+                "request_id": f"INV-PAR-{index:02d}",
                 "vendor_id": 1,
                 "vendor_name": "Acme Corp Supplies",
-                "department_id": 1,
+                "unit_id": 1,
                 "amount": 250.00 + index,
                 "date": "2024-09-13",
             },
@@ -147,8 +147,8 @@ def test_asyncio_gather_pattern():
         # This is the pattern from src/agent.py:
         # await asyncio.gather(
         #     validate_vendor(...),
-        #     check_budget(...),
-        #     detect_duplicates(...)
+        #     lookup_unit(...),
+        #     detect_open_work_orders(...)
         # )
         
         async def mock_tool(name, delay):
@@ -158,8 +158,8 @@ def test_asyncio_gather_pattern():
         # All tools run at same time
         results = await asyncio.gather(
             mock_tool("validate_vendor", 0.234),
-            mock_tool("check_budget", 0.156),
-            mock_tool("detect_duplicates", 0.089)
+            mock_tool("lookup_unit", 0.156),
+            mock_tool("detect_open_work_orders", 0.089)
         )
         
         assert len(results) == 3

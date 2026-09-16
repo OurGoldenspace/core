@@ -33,10 +33,10 @@ After authentication, `Database.set_tenant_context()` calls transaction-local `s
 `migrations/versions/0002_tenant_rls.py` enables and forces RLS on:
 
 - vendors
-- departments
+- units
 - jobs
 - executions
-- payments
+- work_orders
 - tool_invocations
 - llm_calls
 
